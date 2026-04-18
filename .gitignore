@@ -1,0 +1,15 @@
+*.log
+*.tmp
+*.bak
+
+.DS_Store
+
+postgres-dev/.env
+pgdrivebackup/secrets/
+pgdrivebackup/tmp/
+pgdrivebackup/bin/
+pgdrivebackup/dist/
+pgdrivebackup/*.exe
+pgdrivebackup/*.test
+
+.codex
