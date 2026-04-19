@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/CalypsoSys/babalu_vault/internal/backup"
+	"github.com/CalypsoSys/babalu_vault/internal/config"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/joe/calypso_pgvault/pgdrivebackup/internal/backup"
-	"github.com/joe/calypso_pgvault/pgdrivebackup/internal/config"
 )
 
 type tickMsg time.Time

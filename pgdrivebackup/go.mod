@@ -1,4 +1,4 @@
-module github.com/joe/calypso_pgvault/pgdrivebackup
+module github.com/CalypsoSys/babalu_vault
 
 go 1.26
 

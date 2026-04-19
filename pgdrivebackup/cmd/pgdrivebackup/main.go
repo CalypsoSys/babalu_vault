@@ -12,10 +12,10 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/CalypsoSys/babalu_vault/internal/backup"
+	"github.com/CalypsoSys/babalu_vault/internal/config"
+	"github.com/CalypsoSys/babalu_vault/internal/logging"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/joe/calypso_pgvault/pgdrivebackup/internal/backup"
-	"github.com/joe/calypso_pgvault/pgdrivebackup/internal/config"
-	"github.com/joe/calypso_pgvault/pgdrivebackup/internal/logging"
 )
 
 const version = "0.2.0"

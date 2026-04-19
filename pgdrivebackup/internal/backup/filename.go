@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/joe/calypso_pgvault/pgdrivebackup/internal/retention"
+	"github.com/CalypsoSys/babalu_vault/internal/retention"
 )
 
 var managedFilenamePattern = regexp.MustCompile(`^(daily|weekly|monthly)_.+_.+_\d{4}-\d{2}-\d{2}\.gz$`)

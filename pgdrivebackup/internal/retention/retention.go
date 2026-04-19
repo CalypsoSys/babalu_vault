@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/joe/calypso_pgvault/pgdrivebackup/internal/config"
+	"github.com/CalypsoSys/babalu_vault/internal/config"
 )
 
 type Tier string

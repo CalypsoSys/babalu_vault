@@ -44,13 +44,13 @@ See `configs/example.yaml`.
 Database passwords are not stored in YAML. Use environment variables instead:
 
 ```bash
-export LOCALDEV_POSTGRES_PASSWORD=devpassword
+export LOCALDEV_POSTGRES_PASSWORD=local-dev-password
 ```
 
 On Windows PowerShell:
 
 ```powershell
-$env:LOCALDEV_POSTGRES_PASSWORD="devpassword"
+$env:LOCALDEV_POSTGRES_PASSWORD="local-dev-password"
 ```
 
 Key config fields:

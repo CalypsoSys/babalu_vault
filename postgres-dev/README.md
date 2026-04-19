@@ -19,7 +19,7 @@ Default connection settings:
 Host: localhost
 Port: 5432
 User: postgres
-Password: devpassword
+Password: local-dev-password
 Database: postgres
 ```
 
@@ -45,7 +45,7 @@ PostgreSQL also writes logs to the host directory configured by `POSTGRES_LOG_DI
 5. Connect from Windows, WSL, or local tools:
 
 ```bash
-psql "host=localhost port=5432 user=postgres password=devpassword dbname=postgres"
+psql "host=localhost port=5432 user=postgres password=local-dev-password dbname=postgres"
 ```
 
 ## Networking notes

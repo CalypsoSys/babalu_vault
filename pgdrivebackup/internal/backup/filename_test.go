@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/joe/calypso_pgvault/pgdrivebackup/internal/retention"
+	"github.com/CalypsoSys/babalu_vault/internal/retention"
 )
 
 func TestBuildAndParseManagedFilename(t *testing.T) {

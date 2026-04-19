@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/joe/calypso_pgvault/pgdrivebackup/internal/config"
+	"github.com/CalypsoSys/babalu_vault/internal/config"
 )
 
 func TestSelectExcessKeepsNewestManagedFilesOnly(t *testing.T) {

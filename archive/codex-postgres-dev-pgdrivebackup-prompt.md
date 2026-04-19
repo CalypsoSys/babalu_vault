@@ -56,7 +56,7 @@ Windows apps, WSL apps, and local tools should connect with:
 Host: localhost
 Port: 5432
 User: postgres
-Password: devpassword
+Password: local-dev-password
 Database: postgres
 ```
 
@@ -238,8 +238,8 @@ Example:
 ```yaml
 google_drive:
   root_folder_name: "PostgresBackups"
-  credentials_file: "./secrets/google_credentials.json"
-  token_file: "./secrets/google_token.json"
+  credentials_file: "./secrets/google_credentials.example.json"
+  token_file: "./secrets/google_token.example.json"
 
 backup:
   temp_dir: "./tmp"

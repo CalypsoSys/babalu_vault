@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/joe/calypso_pgvault/pgdrivebackup/internal/config"
+	"github.com/CalypsoSys/babalu_vault/internal/config"
 )
 
 func TestSanitizeSensitiveStringMasksPasswordForms(t *testing.T) {

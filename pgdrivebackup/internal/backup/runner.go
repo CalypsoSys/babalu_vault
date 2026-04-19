@@ -17,8 +17,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/joe/calypso_pgvault/pgdrivebackup/internal/config"
-	"github.com/joe/calypso_pgvault/pgdrivebackup/internal/retention"
+	"github.com/CalypsoSys/babalu_vault/internal/config"
+	"github.com/CalypsoSys/babalu_vault/internal/retention"
 )
 
 type Runner struct {
