@@ -115,10 +115,10 @@ func (r *Runner) runOne(ctx context.Context, item config.SelectedDatabase, dryRu
 	}
 	logOperation("info", "backup started")
 
-	filename := BuildFilename(item.Server.Name, item.Database.Name, start)
+	filename := BuildFilename(retention.TierDaily, item.Server.Name, item.Database.Name, start)
 	localPath := filepath.Join(r.Config.Backup.TempDir, filename)
 	row.LocalFile = localPath
-	row.StoredPaths = []string{filepath.Join(r.Config.Backup.RootDir, item.Server.Name, item.Database.Name, string(retention.TierDaily), filename)}
+	row.StoredPaths = []string{filepath.Join(r.Config.Backup.RootDir, item.Server.Name, item.Database.Name, filename)}
 	logOperation("info", "temp backup path prepared", slog.String("local_file", localPath))
 
 	preview, previewErr := CommandPreview(item)
@@ -450,7 +450,7 @@ func sanitizeSensitiveString(value string) string {
 }
 
 func (r *Runner) storeAndRetain(item config.SelectedDatabase, localPath, filename string, now time.Time, logOperation func(string, string, ...slog.Attr)) error {
-	dailyPath := filepath.Join(r.Config.Backup.RootDir, item.Server.Name, item.Database.Name, string(retention.TierDaily), filename)
+	dailyPath := filepath.Join(r.Config.Backup.RootDir, item.Server.Name, item.Database.Name, filename)
 	logOperation("info", "storing daily backup", slog.String("source", localPath), slog.String("destination", dailyPath))
 	if err := copyFile(localPath, dailyPath); err != nil {
 		return fmt.Errorf("store daily backup: %w", err)

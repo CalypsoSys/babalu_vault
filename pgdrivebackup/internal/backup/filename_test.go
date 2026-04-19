@@ -3,12 +3,14 @@ package backup
 import (
 	"testing"
 	"time"
+
+	"github.com/joe/calypso_pgvault/pgdrivebackup/internal/retention"
 )
 
 func TestBuildAndParseManagedFilename(t *testing.T) {
 	ts := time.Date(2026, 4, 18, 2, 0, 0, 0, time.UTC)
-	name := BuildFilename("localdev", "ommadb_dev", ts)
-	if name != "localdev_ommadb_dev_2026-04-18_02-00-00.sql.gz" {
+	name := BuildFilename(retention.TierDaily, "localdev", "ommadb_dev", ts)
+	if name != "daily_localdev_ommadb_dev_2026-04-18.gz" {
 		t.Fatalf("unexpected filename %q", name)
 	}
 
@@ -16,7 +18,7 @@ func TestBuildAndParseManagedFilename(t *testing.T) {
 	if !ok {
 		t.Fatal("expected filename to parse")
 	}
-	if !parsed.Equal(ts) {
+	if parsed.Format("2006-01-02") != ts.Format("2006-01-02") {
 		t.Fatalf("unexpected parsed time %v", parsed)
 	}
 }

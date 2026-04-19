@@ -49,16 +49,19 @@ type LocalFile struct {
 	Name string
 }
 
-var managedFilenamePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.sql\.gz$`)
+var managedFilenamePattern = regexp.MustCompile(`^(daily|weekly|monthly)_.+_.+_\d{4}-\d{2}-\d{2}\.gz$`)
 
-func SelectExcess(files []LocalFile, keep int, serverName, databaseName string) []LocalFile {
+func SelectExcess(files []LocalFile, keep int, tier Tier, serverName, databaseName string) []LocalFile {
 	if keep < 0 {
 		keep = 0
 	}
 	var managed []Candidate
 	for _, file := range files {
-		ts, ok := parseManagedTimestamp(file.Name, serverName, databaseName)
+		fileTier, ts, ok := parseManagedFile(file.Name, serverName, databaseName)
 		if !ok {
+			continue
+		}
+		if fileTier != tier {
 			continue
 		}
 		managed = append(managed, Candidate{File: file, Time: ts})
@@ -93,46 +96,40 @@ func (p *Planner) ApplyAt(serverName, databaseName string, policy config.Retenti
 	p.DeleteLog = nil
 	p.PromoteLog = nil
 
-	dirs := map[Tier]string{
-		TierDaily:   filepath.Join(p.RootDir, serverName, databaseName, string(TierDaily)),
-		TierWeekly:  filepath.Join(p.RootDir, serverName, databaseName, string(TierWeekly)),
-		TierMonthly: filepath.Join(p.RootDir, serverName, databaseName, string(TierMonthly)),
-	}
-	for tier, dir := range dirs {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return fmt.Errorf("create retention directory for %s/%s/%s: %w", serverName, databaseName, tier, err)
-		}
+	baseDir := filepath.Join(p.RootDir, serverName, databaseName)
+	if err := os.MkdirAll(baseDir, 0o755); err != nil {
+		return fmt.Errorf("create retention directory for %s/%s: %w", serverName, databaseName, err)
 	}
 
-	dailyFiles, err := ListLocalFiles(dirs[TierDaily])
+	dailyFiles, err := ListLocalFiles(baseDir)
 	if err != nil {
 		return fmt.Errorf("list daily files: %w", err)
 	}
-	weeklyFiles, err := ListLocalFiles(dirs[TierWeekly])
+	weeklyFiles, err := ListLocalFiles(baseDir)
 	if err != nil {
 		return fmt.Errorf("list weekly files: %w", err)
 	}
-	monthlyFiles, err := ListLocalFiles(dirs[TierMonthly])
+	monthlyFiles, err := ListLocalFiles(baseDir)
 	if err != nil {
 		return fmt.Errorf("list monthly files: %w", err)
 	}
 
-	if err := p.promoteOverflow(dailyFiles, &weeklyFiles, serverName, databaseName, policy.DailyKeep, now, 7*24*time.Hour, TierDaily, TierWeekly, dirs[TierWeekly]); err != nil {
+	if err := p.promoteOverflow(dailyFiles, &weeklyFiles, serverName, databaseName, policy.DailyKeep, now, 7*24*time.Hour, TierDaily, TierWeekly, baseDir); err != nil {
 		return err
 	}
-	if err := p.promoteOverflow(weeklyFiles, &monthlyFiles, serverName, databaseName, policy.WeeklyKeep, now, 30*24*time.Hour, TierWeekly, TierMonthly, dirs[TierMonthly]); err != nil {
+	if err := p.promoteOverflow(weeklyFiles, &monthlyFiles, serverName, databaseName, policy.WeeklyKeep, now, 30*24*time.Hour, TierWeekly, TierMonthly, baseDir); err != nil {
 		return err
 	}
 
-	dailyFiles, err = ListLocalFiles(dirs[TierDaily])
+	dailyFiles, err = ListLocalFiles(baseDir)
 	if err != nil {
 		return fmt.Errorf("relist daily files: %w", err)
 	}
-	weeklyFiles, err = ListLocalFiles(dirs[TierWeekly])
+	weeklyFiles, err = ListLocalFiles(baseDir)
 	if err != nil {
 		return fmt.Errorf("relist weekly files: %w", err)
 	}
-	monthlyFiles, err = ListLocalFiles(dirs[TierMonthly])
+	monthlyFiles, err = ListLocalFiles(baseDir)
 	if err != nil {
 		return fmt.Errorf("relist monthly files: %w", err)
 	}
@@ -146,7 +143,7 @@ func (p *Planner) ApplyAt(serverName, databaseName string, policy config.Retenti
 		{tier: TierWeekly, keep: policy.WeeklyKeep, files: weeklyFiles},
 		{tier: TierMonthly, keep: policy.MonthlyKeep, files: monthlyFiles},
 	} {
-		excess := SelectExcess(item.files, item.keep, serverName, databaseName)
+		excess := SelectExcess(item.files, item.keep, item.tier, serverName, databaseName)
 		for _, file := range excess {
 			p.DeleteLog = append(p.DeleteLog, Deletion{Tier: item.tier, File: file})
 			if p.DryRun {
@@ -179,7 +176,7 @@ func ListLocalFiles(dir string) ([]LocalFile, error) {
 }
 
 func (p *Planner) promoteOverflow(sourceFiles []LocalFile, destFiles *[]LocalFile, serverName, databaseName string, keep int, now time.Time, minAge time.Duration, fromTier, toTier Tier, destDir string) error {
-	overflow := overflowCandidates(sourceFiles, keep, serverName, databaseName)
+	overflow := overflowCandidates(sourceFiles, keep, fromTier, serverName, databaseName)
 	for _, candidate := range overflow {
 		if now.Sub(candidate.Time) < minAge {
 			continue
@@ -188,29 +185,30 @@ func (p *Planner) promoteOverflow(sourceFiles []LocalFile, destFiles *[]LocalFil
 			continue
 		}
 
-		destPath := filepath.Join(destDir, candidate.File.Name)
+		destName := buildManagedFilename(toTier, serverName, databaseName, candidate.Time)
+		destPath := filepath.Join(destDir, destName)
 		p.PromoteLog = append(p.PromoteLog, Promotion{
 			From: fromTier,
 			To:   toTier,
-			File: LocalFile{Path: destPath, Name: candidate.File.Name},
+			File: LocalFile{Path: destPath, Name: destName},
 		})
 		if p.DryRun {
-			*destFiles = append(*destFiles, LocalFile{Path: destPath, Name: candidate.File.Name})
+			*destFiles = append(*destFiles, LocalFile{Path: destPath, Name: destName})
 			continue
 		}
 		if err := moveFile(candidate.File.Path, destPath); err != nil {
 			return fmt.Errorf("promote %s backup %s to %s: %w", fromTier, candidate.File.Name, toTier, err)
 		}
-		*destFiles = append(*destFiles, LocalFile{Path: destPath, Name: candidate.File.Name})
+		*destFiles = append(*destFiles, LocalFile{Path: destPath, Name: destName})
 	}
 	return nil
 }
 
-func overflowCandidates(files []LocalFile, keep int, serverName, databaseName string) []Candidate {
+func overflowCandidates(files []LocalFile, keep int, tier Tier, serverName, databaseName string) []Candidate {
 	if keep < 0 {
 		keep = 0
 	}
-	candidates := managedCandidates(files, serverName, databaseName)
+	candidates := managedCandidates(files, tier, serverName, databaseName)
 	if len(candidates) <= keep {
 		return nil
 	}
@@ -221,11 +219,14 @@ func overflowCandidates(files []LocalFile, keep int, serverName, databaseName st
 	return overflow
 }
 
-func managedCandidates(files []LocalFile, serverName, databaseName string) []Candidate {
+func managedCandidates(files []LocalFile, tier Tier, serverName, databaseName string) []Candidate {
 	var managed []Candidate
 	for _, file := range files {
-		ts, ok := parseManagedTimestamp(file.Name, serverName, databaseName)
+		fileTier, ts, ok := parseManagedFile(file.Name, serverName, databaseName)
 		if !ok {
+			continue
+		}
+		if fileTier != tier {
 			continue
 		}
 		managed = append(managed, Candidate{File: file, Time: ts})
@@ -246,8 +247,11 @@ func hasPeriodAt(files []LocalFile, tier Tier, ts time.Time, serverName, databas
 }
 
 func samePeriod(filename string, tier Tier, ts time.Time, serverName, databaseName string) bool {
-	fileTime, ok := parseManagedTimestamp(filename, serverName, databaseName)
+	fileTier, fileTime, ok := parseManagedFile(filename, serverName, databaseName)
 	if !ok {
+		return false
+	}
+	if fileTier != tier {
 		return false
 	}
 	switch tier {
@@ -290,19 +294,26 @@ func moveFile(src, dst string) error {
 	return os.Remove(src)
 }
 
-func parseManagedTimestamp(filename, serverName, databaseName string) (time.Time, bool) {
-	prefix := serverName + "_" + databaseName + "_"
-	if !strings.HasPrefix(filename, prefix) {
-		return time.Time{}, false
+func parseManagedFile(filename, serverName, databaseName string) (Tier, time.Time, bool) {
+	for _, tier := range []Tier{TierDaily, TierWeekly, TierMonthly} {
+		prefix := string(tier) + "_" + serverName + "_" + databaseName + "_"
+		if !strings.HasPrefix(filename, prefix) {
+			continue
+		}
+		suffix := strings.TrimPrefix(filename, prefix)
+		if !managedFilenamePattern.MatchString(filename) {
+			return "", time.Time{}, false
+		}
+		tsPart := strings.TrimSuffix(suffix, ".gz")
+		ts, err := time.Parse("2006-01-02", tsPart)
+		if err != nil {
+			return "", time.Time{}, false
+		}
+		return tier, ts, true
 	}
-	suffix := strings.TrimPrefix(filename, prefix)
-	if !managedFilenamePattern.MatchString(suffix) {
-		return time.Time{}, false
-	}
-	tsPart := strings.TrimSuffix(suffix, ".sql.gz")
-	ts, err := time.Parse("2006-01-02_15-04-05", tsPart)
-	if err != nil {
-		return time.Time{}, false
-	}
-	return ts, true
+	return "", time.Time{}, false
+}
+
+func buildManagedFilename(tier Tier, serverName, databaseName string, ts time.Time) string {
+	return fmt.Sprintf("%s_%s_%s_%s.gz", tier, serverName, databaseName, ts.Format("2006-01-02"))
 }

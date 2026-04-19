@@ -11,12 +11,12 @@ import (
 
 func TestSelectExcessKeepsNewestManagedFilesOnly(t *testing.T) {
 	files := []LocalFile{
-		{Path: "/tmp/1", Name: "local_db_2026-04-01_02-00-00.sql.gz"},
-		{Path: "/tmp/2", Name: "local_db_2026-04-02_02-00-00.sql.gz"},
-		{Path: "/tmp/3", Name: "local_db_2026-04-03_02-00-00.sql.gz"},
+		{Path: "/tmp/1", Name: "daily_local_db_2026-04-01.gz"},
+		{Path: "/tmp/2", Name: "daily_local_db_2026-04-02.gz"},
+		{Path: "/tmp/3", Name: "daily_local_db_2026-04-03.gz"},
 		{Path: "/tmp/4", Name: "notes.txt"},
 	}
-	excess := SelectExcess(files, 2, "local", "db")
+	excess := SelectExcess(files, 2, TierDaily, "local", "db")
 	if len(excess) != 1 || excess[0].Path != "/tmp/1" {
 		t.Fatalf("unexpected excess files: %+v", excess)
 	}
@@ -24,26 +24,23 @@ func TestSelectExcessKeepsNewestManagedFilesOnly(t *testing.T) {
 
 func TestHasPeriodBackup(t *testing.T) {
 	now := time.Date(2026, 4, 18, 2, 0, 0, 0, time.UTC)
-	files := []LocalFile{{Path: "/tmp/file", Name: "local_db_2026-04-14_02-00-00.sql.gz"}}
+	files := []LocalFile{{Path: "/tmp/file", Name: "weekly_local_db_2026-04-14.gz"}}
 	if !HasPeriodBackup(files, TierWeekly, now, "local", "db") {
 		t.Fatal("expected weekly backup to exist")
-	}
-	if !HasPeriodBackup(files, TierMonthly, now, "local", "db") {
-		t.Fatal("expected monthly backup to exist")
 	}
 }
 
 func TestPlannerDryRunDoesNotDelete(t *testing.T) {
 	root := t.TempDir()
-	dailyDir := filepath.Join(root, "local", "db", "daily")
-	if err := os.MkdirAll(dailyDir, 0o755); err != nil {
+	baseDir := filepath.Join(root, "local", "db")
+	if err := os.MkdirAll(baseDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{
-		"local_db_2026-04-01_02-00-00.sql.gz",
-		"local_db_2026-04-02_02-00-00.sql.gz",
+		"daily_local_db_2026-04-01.gz",
+		"daily_local_db_2026-04-02.gz",
 	} {
-		if err := os.WriteFile(filepath.Join(dailyDir, name), []byte("x"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(baseDir, name), []byte("x"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -53,7 +50,7 @@ func TestPlannerDryRunDoesNotDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Apply() error = %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dailyDir, "local_db_2026-04-01_02-00-00.sql.gz")); err != nil {
+	if _, err := os.Stat(filepath.Join(baseDir, "daily_local_db_2026-04-01.gz")); err != nil {
 		t.Fatalf("expected file to remain in dry-run, stat error = %v", err)
 	}
 	if len(planner.DeleteLog) != 1 {
@@ -63,28 +60,24 @@ func TestPlannerDryRunDoesNotDelete(t *testing.T) {
 
 func TestPlannerPromotesDailyToWeeklyAndWeeklyToMonthly(t *testing.T) {
 	root := t.TempDir()
-	dailyDir := filepath.Join(root, "local", "db", "daily")
-	weeklyDir := filepath.Join(root, "local", "db", "weekly")
-	monthlyDir := filepath.Join(root, "local", "db", "monthly")
-	for _, dir := range []string{dailyDir, weeklyDir, monthlyDir} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
+	baseDir := filepath.Join(root, "local", "db")
+	if err := os.MkdirAll(baseDir, 0o755); err != nil {
+		t.Fatal(err)
 	}
 
 	now := time.Date(2026, 4, 18, 2, 0, 0, 0, time.UTC)
 	for _, name := range []string{
-		"local_db_2026-04-18_02-00-00.sql.gz",
-		"local_db_2026-04-17_02-00-00.sql.gz",
-		"local_db_2026-04-16_02-00-00.sql.gz",
-		"local_db_2026-04-15_02-00-00.sql.gz",
-		"local_db_2026-04-10_02-00-00.sql.gz",
+		"daily_local_db_2026-04-18.gz",
+		"daily_local_db_2026-04-17.gz",
+		"daily_local_db_2026-04-16.gz",
+		"daily_local_db_2026-04-15.gz",
+		"daily_local_db_2026-04-10.gz",
 	} {
-		if err := os.WriteFile(filepath.Join(dailyDir, name), []byte("x"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(baseDir, name), []byte("x"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(weeklyDir, "local_db_2026-03-10_02-00-00.sql.gz"), []byte("x"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(baseDir, "weekly_local_db_2026-03-10.gz"), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -93,13 +86,13 @@ func TestPlannerPromotesDailyToWeeklyAndWeeklyToMonthly(t *testing.T) {
 		t.Fatalf("ApplyAt() error = %v", err)
 	}
 
-	if _, err := os.Stat(filepath.Join(weeklyDir, "local_db_2026-04-10_02-00-00.sql.gz")); err != nil {
+	if _, err := os.Stat(filepath.Join(baseDir, "weekly_local_db_2026-04-10.gz")); err != nil {
 		t.Fatalf("expected promoted weekly file, stat error = %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(monthlyDir, "local_db_2026-03-10_02-00-00.sql.gz")); err != nil {
+	if _, err := os.Stat(filepath.Join(baseDir, "monthly_local_db_2026-03-10.gz")); err != nil {
 		t.Fatalf("expected promoted monthly file, stat error = %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dailyDir, "local_db_2026-04-10_02-00-00.sql.gz")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(baseDir, "daily_local_db_2026-04-10.gz")); !os.IsNotExist(err) {
 		t.Fatalf("expected promoted daily file to leave daily tier, stat err = %v", err)
 	}
 }

@@ -67,9 +67,15 @@ backup:
 Backups are stored under:
 
 ```text
-<root_dir>/<server>/<database>/daily/
-<root_dir>/<server>/<database>/weekly/
-<root_dir>/<server>/<database>/monthly/
+<root_dir>/<server>/<database>/
+```
+
+Managed files are prefixed by retention tier:
+
+```text
+daily_<server>_<database>_YYYY-MM-DD.gz
+weekly_<server>_<database>_YYYY-MM-DD.gz
+monthly_<server>_<database>_YYYY-MM-DD.gz
 ```
 
 With the default settings, each database keeps at most 6 managed backups:
@@ -209,13 +215,13 @@ Example YAML for remote TCP:
 ## Backup file naming
 
 ```text
-serverName_databaseName_YYYY-MM-DD_HH-mm-ss.sql.gz
+daily_serverName_databaseName_YYYY-MM-DD.gz
 ```
 
 Example:
 
 ```text
-localdev_app1_dev_2026-04-18_02-00-00.sql.gz
+daily_localdev_app1_dev_2026-04-18.gz
 ```
 
 ## Backup lifecycle
@@ -229,12 +235,12 @@ retention:
   monthly_keep: 1
 ```
 
-Each successful run writes one new backup into `daily/`.
+Each successful run writes one new `daily_...gz` backup into the database directory.
 
 After that, the same backup cycle automatically manages promotion:
 
-- when there are more than 4 daily backups, the oldest overflow daily can be promoted into `weekly/` once it is at least 7 days old
-- when there is more than 1 weekly backup, the oldest overflow weekly can be promoted into `monthly/` once it is at least 30 days old
+- when there are more than 4 daily backups, the oldest overflow daily can be promoted into a `weekly_...gz` file once it is at least 7 days old
+- when there is more than 1 weekly backup, the oldest overflow weekly can be promoted into a `monthly_...gz` file once it is at least 30 days old
 - only 1 weekly and 1 monthly backup are kept with the default policy
 
 Cleanup is intentionally conservative:
@@ -246,13 +252,13 @@ Cleanup is intentionally conservative:
 ## Restore
 
 ```bash
-gunzip -c backup.sql.gz | psql --dbname target_db
+gunzip -c backup.gz | psql --dbname target_db
 ```
 
 Docker restore:
 
 ```bash
-gunzip -c backup.sql.gz | docker exec -i dev-postgres psql --username postgres --dbname target_db
+gunzip -c backup.gz | docker exec -i dev-postgres psql --username postgres --dbname target_db
 ```
 
 ## Scheduling
