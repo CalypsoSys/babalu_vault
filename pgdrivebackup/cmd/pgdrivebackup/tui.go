@@ -123,12 +123,12 @@ func newModel(configPath string, cfg *config.Config, dryRun bool, logger *slog.L
 		targetsVP:     targetsVP,
 		activityVP:    activityVP,
 	}
-	m.addEvent("info", fmt.Sprintf("loaded %d database targets from %s", len(statuses), configPath))
-	m.addEvent("info", fmt.Sprintf("scheduler armed with interval %s", interval))
+	m.recordEvent("info", fmt.Sprintf("loaded %d database targets from %s", len(statuses), configPath))
+	m.recordEvent("info", fmt.Sprintf("scheduler armed with interval %s", interval))
 	if dryRun {
-		m.addEvent("warn", "TUI dry-run mode enabled")
+		m.recordEvent("warn", "TUI dry-run mode enabled")
 	}
-	m.addEvent("info", "scheduled backup started")
+	m.recordEvent("info", "scheduled backup started")
 	m.syncViewports()
 	return m
 }
@@ -178,7 +178,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if !m.running {
 					m.running = true
 					m.currentAction = "manual backup"
-					m.addEvent("info", "manual backup started")
+					m.recordEvent("info", "manual backup started")
 					m.syncViewports()
 					return m, startBackupCmd(m.cfg, m.logger, false, m.dryRun)
 				}
@@ -221,7 +221,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !m.running {
 				m.running = true
 				m.currentAction = "manual backup"
-				m.addEvent("info", "manual backup started")
+				m.recordEvent("info", "manual backup started")
 				m.syncViewports()
 				return m, startBackupCmd(m.cfg, m.logger, false, m.dryRun)
 			}
@@ -251,7 +251,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.paused && !m.running && !m.nextRun.IsZero() && !m.now.Before(m.nextRun) {
 			m.running = true
 			m.currentAction = "scheduled backup"
-			m.addEvent("info", "scheduled backup started")
+			m.recordEvent("info", "scheduled backup started")
 			m.syncViewports()
 			return m, tea.Batch(tickCmd(), startBackupCmd(m.cfg, m.logger, true, m.dryRun))
 		}
@@ -265,19 +265,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.now = msg.finishedAt
 		if msg.err != nil {
 			m.lastError = msg.err.Error()
-			m.addEvent("error", fmt.Sprintf("backup failed: %v", msg.err))
+			m.recordEvent("error", fmt.Sprintf("backup failed: %v", msg.err))
 		} else {
 			m.lastError = ""
 			label := "manual"
 			if msg.automatic {
 				label = "scheduled"
 			}
-			m.addEvent("info", fmt.Sprintf("%s backup completed in %s", label, msg.finishedAt.Sub(msg.startedAt).Round(time.Millisecond)))
+			m.recordEvent("info", fmt.Sprintf("%s backup completed in %s", label, msg.finishedAt.Sub(msg.startedAt).Round(time.Millisecond)))
 		}
 		for _, row := range msg.rows {
 			m.updateStatus(row, msg.finishedAt)
 			for _, op := range row.Operations {
-				m.addEvent(op.Level, fmt.Sprintf("%s/%s [%s] %s", row.Server, row.Database, row.Method, op.Message))
+				m.addActivity(op.Level, fmt.Sprintf("%s/%s [%s] %s", row.Server, row.Database, row.Method, op.Message))
 			}
 		}
 		m.syncViewports()
@@ -295,9 +295,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *model) togglePause() {
 	m.paused = !m.paused
 	if m.paused {
-		m.addEvent("warn", "scheduler paused")
+		m.recordEvent("warn", "scheduler paused")
 	} else {
-		m.addEvent("info", "scheduler resumed")
+		m.recordEvent("info", "scheduler resumed")
 	}
 }
 
@@ -323,7 +323,19 @@ func (m *model) updateStatus(row backup.SummaryRow, at time.Time) {
 	}
 }
 
-func (m *model) addEvent(level, message string) {
+func (m *model) recordEvent(level, message string) {
+	switch level {
+	case "error":
+		m.logger.Error(message)
+	case "warn":
+		m.logger.Warn(message)
+	default:
+		m.logger.Info(message)
+	}
+	m.addActivity(level, message)
+}
+
+func (m *model) addActivity(level, message string) {
 	m.events = append([]eventEntry{{
 		At:      time.Now(),
 		Message: message,
