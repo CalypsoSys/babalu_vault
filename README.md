@@ -27,3 +27,16 @@ Start with:
 
 1. Read `postgres-dev/README.md`.
 2. Read `pgdrivebackup/README.md`.
+
+## Make Targets
+
+Common development commands are available at the repo root:
+
+```bash
+make build
+make test
+make run
+make dry-run
+```
+
+`make build` writes the binary to `./bin/pgdrivebackup`.
