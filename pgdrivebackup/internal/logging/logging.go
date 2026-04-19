@@ -12,8 +12,19 @@ type nopCloser struct{}
 func (nopCloser) Close() error { return nil }
 
 func New(logPath string) (*slog.Logger, io.Closer, error) {
+	return newLogger(logPath, true)
+}
+
+func NewForTUI(logPath string) (*slog.Logger, io.Closer, error) {
+	return newLogger(logPath, false)
+}
+
+func newLogger(logPath string, includeStdout bool) (*slog.Logger, io.Closer, error) {
 	if logPath == "" {
-		return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})), nopCloser{}, nil
+		if includeStdout {
+			return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})), nopCloser{}, nil
+		}
+		return slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo})), nopCloser{}, nil
 	}
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
 		return nil, nil, err
@@ -22,6 +33,9 @@ func New(logPath string) (*slog.Logger, io.Closer, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	writer := io.MultiWriter(os.Stdout, logFile)
+	writer := io.Writer(logFile)
+	if includeStdout {
+		writer = io.MultiWriter(os.Stdout, logFile)
+	}
 	return slog.New(slog.NewTextHandler(writer, &slog.HandlerOptions{Level: slog.LevelInfo})), logFile, nil
 }

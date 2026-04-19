@@ -7,6 +7,7 @@ It supports:
 - Native PostgreSQL/TCP backups using local `pg_dump`
 - Docker PostgreSQL backups using `docker exec`
 - SSH-backed PostgreSQL backups for remote native or remote Docker `pg_dump`
+- Gzipped plain SQL backups for easier cross-version restores
 - Multiple servers and multiple databases per server
 - Per-database retention overrides
 - Gzip compression
@@ -146,7 +147,7 @@ go run ./cmd/pgdrivebackup version
 Uses the local `pg_dump` binary:
 
 ```bash
-pg_dump --format=custom --no-owner --no-acl --host HOST --port PORT --username USER DBNAME
+pg_dump --format=plain --no-owner --no-acl --no-password --host HOST --port PORT --username USER DBNAME
 ```
 
 Passwords are passed through `PGPASSWORD`, not on the command line.
@@ -156,7 +157,7 @@ Passwords are passed through `PGPASSWORD`, not on the command line.
 Uses `docker exec` to run `pg_dump` inside the configured container:
 
 ```bash
-docker exec -i -e PGPASSWORD=... CONTAINER pg_dump --format=custom --no-owner --no-acl --username USER DBNAME
+docker exec -e PGPASSWORD=... CONTAINER pg_dump --format=plain --no-owner --no-acl --no-password --username USER DBNAME
 ```
 
 ### SSH mode
@@ -185,7 +186,7 @@ Example YAML for remote Docker:
 That produces a remote command shape like:
 
 ```bash
-ssh backup@example-host 'docker exec -i -e PGPASSWORD=${REMOTE_POSTGRES_PASSWORD} ommadb-postgres pg_dump --format=custom --no-owner --no-acl --username postgres mma_data_web'
+ssh backup@example-host 'docker exec -e PGPASSWORD=${REMOTE_POSTGRES_PASSWORD} ommadb-postgres pg_dump --format=plain --no-owner --no-acl --no-password --username postgres mma_data_web'
 ```
 
 Example YAML for remote TCP:
@@ -206,13 +207,13 @@ Example YAML for remote TCP:
 ## Backup file naming
 
 ```text
-serverName_databaseName_YYYY-MM-DD_HH-mm-ss.dump.gz
+serverName_databaseName_YYYY-MM-DD_HH-mm-ss.sql.gz
 ```
 
 Example:
 
 ```text
-localdev_app1_dev_2026-04-18_02-00-00.dump.gz
+localdev_app1_dev_2026-04-18_02-00-00.sql.gz
 ```
 
 ## Backup lifecycle
@@ -243,14 +244,13 @@ Cleanup is intentionally conservative:
 ## Restore
 
 ```bash
-gunzip backup.dump.gz
-pg_restore --clean --if-exists --no-owner --no-acl --dbname target_db backup.dump
+gunzip -c backup.sql.gz | psql --dbname target_db
 ```
 
 Docker restore:
 
 ```bash
-gunzip -c backup.dump.gz | docker exec -i dev-postgres pg_restore --clean --if-exists --no-owner --no-acl --username postgres --dbname target_db
+gunzip -c backup.sql.gz | docker exec -i dev-postgres psql --username postgres --dbname target_db
 ```
 
 ## Scheduling

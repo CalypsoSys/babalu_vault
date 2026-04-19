@@ -101,7 +101,7 @@ func runUI(configPath string, dryRun bool) error {
 	if err != nil {
 		return err
 	}
-	logger, closer, err := logging.New(cfg.Backup.LogPath)
+	logger, closer, err := logging.NewForTUI(cfg.Backup.LogPath)
 	if err != nil {
 		return err
 	}

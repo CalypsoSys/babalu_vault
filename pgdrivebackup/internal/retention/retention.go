@@ -49,7 +49,7 @@ type LocalFile struct {
 	Name string
 }
 
-var managedFilenamePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.dump\.gz$`)
+var managedFilenamePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.sql\.gz$`)
 
 func SelectExcess(files []LocalFile, keep int, serverName, databaseName string) []LocalFile {
 	if keep < 0 {
@@ -299,7 +299,7 @@ func parseManagedTimestamp(filename, serverName, databaseName string) (time.Time
 	if !managedFilenamePattern.MatchString(suffix) {
 		return time.Time{}, false
 	}
-	tsPart := strings.TrimSuffix(suffix, ".dump.gz")
+	tsPart := strings.TrimSuffix(suffix, ".sql.gz")
 	ts, err := time.Parse("2006-01-02_15-04-05", tsPart)
 	if err != nil {
 		return time.Time{}, false

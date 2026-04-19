@@ -252,7 +252,7 @@ func buildDumpCommand(ctx context.Context, item config.SelectedDatabase) (*exec.
 			return nil, nil, nil, fmt.Errorf("pg_dump not found in PATH: %w", err)
 		}
 		args := []string{
-			"--format=custom",
+			"--format=plain",
 			"--no-owner",
 			"--no-acl",
 			"--no-password",
@@ -278,7 +278,7 @@ func buildDumpCommand(ctx context.Context, item config.SelectedDatabase) (*exec.
 			"-e", "PGPASSWORD=" + password,
 			item.Server.Container,
 			"pg_dump",
-			"--format=custom",
+			"--format=plain",
 			"--no-owner",
 			"--no-acl",
 			"--no-password",
@@ -325,7 +325,7 @@ func buildSSHRemoteCommand(item config.SelectedDatabase, password string) (strin
 		args := []string{
 			"PGPASSWORD=" + shellQuote(password),
 			"pg_dump",
-			"--format=custom",
+			"--format=plain",
 			"--no-owner",
 			"--no-acl",
 			"--no-password",
@@ -342,7 +342,7 @@ func buildSSHRemoteCommand(item config.SelectedDatabase, password string) (strin
 			"-e", shellQuote("PGPASSWORD=" + password),
 			shellQuote(item.Server.Container),
 			"pg_dump",
-			"--format=custom",
+			"--format=plain",
 			"--no-owner",
 			"--no-acl",
 			"--no-password",
@@ -369,7 +369,7 @@ func CommandPreview(item config.SelectedDatabase) (string, error) {
 	switch item.Server.Type {
 	case "tcp":
 		return fmt.Sprintf(
-			"PGPASSWORD=%s pg_dump --format=custom --no-owner --no-acl --no-password --host %s --port %d --username %s %s",
+			"PGPASSWORD=%s pg_dump --format=plain --no-owner --no-acl --no-password --host %s --port %d --username %s %s",
 			envPlaceholder(item.Server.PasswordEnv),
 			item.Server.Host,
 			item.Server.Port,
@@ -378,7 +378,7 @@ func CommandPreview(item config.SelectedDatabase) (string, error) {
 		), nil
 	case "docker":
 		return fmt.Sprintf(
-			"docker exec -e PGPASSWORD=%s %s pg_dump --format=custom --no-owner --no-acl --no-password --username %s %s",
+			"docker exec -e PGPASSWORD=%s %s pg_dump --format=plain --no-owner --no-acl --no-password --username %s %s",
 			envPlaceholder(item.Server.PasswordEnv),
 			item.Server.Container,
 			item.Server.Username,
