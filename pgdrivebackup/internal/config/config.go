@@ -17,12 +17,13 @@ type Config struct {
 }
 
 type BackupConfig struct {
-	TempDir     string `yaml:"temp_dir"`
-	RootDir     string `yaml:"root_dir"`
-	LogPath     string `yaml:"log_path"`
-	GzipLevel   int    `yaml:"gzip_level"`
-	DryRun      bool   `yaml:"dry_run"`
-	RunInterval string `yaml:"run_interval"`
+	TempDir   string `yaml:"temp_dir"`
+	RootDir   string `yaml:"root_dir"`
+	LogPath   string `yaml:"log_path"`
+	GzipLevel int    `yaml:"gzip_level"`
+	DryRun    bool   `yaml:"dry_run"`
+	TimeOfDay string `yaml:"time_of_day"`
+	StatePath string `yaml:"state_path"`
 }
 
 type RetentionPolicy struct {
@@ -79,8 +80,11 @@ func (c *Config) applyDefaults(baseDir string) {
 	if c.Backup.LogPath == "" {
 		c.Backup.LogPath = "./logs/pgdrivebackup.log"
 	}
-	if c.Backup.RunInterval == "" {
-		c.Backup.RunInterval = "1h"
+	if c.Backup.TimeOfDay == "" {
+		c.Backup.TimeOfDay = "02:00"
+	}
+	if c.Backup.StatePath == "" {
+		c.Backup.StatePath = "./state/pgdrivebackup-scheduler.json"
 	}
 	if c.Retention.DailyKeep == 0 {
 		c.Retention.DailyKeep = 14
@@ -94,6 +98,7 @@ func (c *Config) applyDefaults(baseDir string) {
 	c.Backup.TempDir = resolvePath(baseDir, c.Backup.TempDir)
 	c.Backup.RootDir = resolvePath(baseDir, c.Backup.RootDir)
 	c.Backup.LogPath = resolvePath(baseDir, c.Backup.LogPath)
+	c.Backup.StatePath = resolvePath(baseDir, c.Backup.StatePath)
 }
 
 func resolvePath(baseDir, p string) string {
@@ -110,7 +115,7 @@ func (c *Config) Validate() error {
 	if c.Backup.RootDir == "" {
 		return errors.New("backup.root_dir is required")
 	}
-	if _, err := c.Backup.RunIntervalDuration(); err != nil {
+	if _, _, err := c.Backup.ScheduledTimeOfDay(); err != nil {
 		return err
 	}
 	if len(c.Servers) == 0 {
@@ -181,15 +186,15 @@ func validateRetention(r RetentionPolicy, label string) error {
 	return nil
 }
 
-func (b BackupConfig) RunIntervalDuration() (time.Duration, error) {
-	d, err := time.ParseDuration(b.RunInterval)
+func (b BackupConfig) ScheduledTimeOfDay() (int, int, error) {
+	if b.TimeOfDay == "" {
+		return 0, 0, errors.New("backup.time_of_day is required")
+	}
+	parsed, err := time.Parse("15:04", b.TimeOfDay)
 	if err != nil {
-		return 0, fmt.Errorf("backup.run_interval must be a valid duration, got %q", b.RunInterval)
+		return 0, 0, fmt.Errorf("backup.time_of_day must use 24-hour HH:MM format, got %q", b.TimeOfDay)
 	}
-	if d <= 0 {
-		return 0, errors.New("backup.run_interval must be greater than zero")
-	}
-	return d, nil
+	return parsed.Hour(), parsed.Minute(), nil
 }
 
 func (c *Config) Filter(serverName, databaseName string) []SelectedDatabase {

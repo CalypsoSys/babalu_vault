@@ -14,7 +14,8 @@ backup:
   temp_dir: "./tmp"
   root_dir: "./backups"
   log_path: "./logs/pgdrivebackup.log"
-  run_interval: "30m"
+  time_of_day: "03:15"
+  state_path: "./state/scheduler.json"
 retention:
   daily_keep: 14
   weekly_keep: 8
@@ -43,11 +44,14 @@ servers:
 	if cfg.Backup.RootDir != filepath.Join(dir, "backups") {
 		t.Fatalf("unexpected backup root path %q", cfg.Backup.RootDir)
 	}
-	if cfg.Backup.RunInterval != "30m" {
-		t.Fatalf("unexpected run interval %q", cfg.Backup.RunInterval)
+	if cfg.Backup.TimeOfDay != "03:15" {
+		t.Fatalf("unexpected time of day %q", cfg.Backup.TimeOfDay)
 	}
 	if cfg.Backup.LogPath != filepath.Join(dir, "logs", "pgdrivebackup.log") {
 		t.Fatalf("unexpected log path %q", cfg.Backup.LogPath)
+	}
+	if cfg.Backup.StatePath != filepath.Join(dir, "state", "scheduler.json") {
+		t.Fatalf("unexpected scheduler state path %q", cfg.Backup.StatePath)
 	}
 }
 
@@ -78,9 +82,9 @@ func TestFilterAndRetentionOverride(t *testing.T) {
 	}
 }
 
-func TestRunIntervalValidation(t *testing.T) {
+func TestTimeOfDayValidation(t *testing.T) {
 	cfg := &Config{
-		Backup: BackupConfig{RootDir: "/tmp/backups", RunInterval: "not-a-duration"},
+		Backup: BackupConfig{RootDir: "/tmp/backups", TimeOfDay: "25:99"},
 		Servers: []ServerConfig{
 			{
 				Name:     "localdev",
@@ -97,13 +101,13 @@ func TestRunIntervalValidation(t *testing.T) {
 	}
 
 	if err := cfg.Validate(); err == nil {
-		t.Fatal("expected invalid run interval to fail validation")
+		t.Fatal("expected invalid time of day to fail validation")
 	}
 }
 
 func TestValidateAllowsSSHRemoteDocker(t *testing.T) {
 	cfg := &Config{
-		Backup:    BackupConfig{RootDir: "/tmp/backups", RunInterval: "1h", GzipLevel: 6},
+		Backup:    BackupConfig{RootDir: "/tmp/backups", TimeOfDay: "02:00", GzipLevel: 6},
 		Retention: RetentionPolicy{DailyKeep: 4, WeeklyKeep: 1, MonthlyKeep: 1},
 		Servers: []ServerConfig{
 			{
@@ -128,7 +132,7 @@ func TestValidateAllowsSSHRemoteDocker(t *testing.T) {
 
 func TestValidateRejectsSSHWithoutTarget(t *testing.T) {
 	cfg := &Config{
-		Backup:    BackupConfig{RootDir: "/tmp/backups", RunInterval: "1h", GzipLevel: 6},
+		Backup:    BackupConfig{RootDir: "/tmp/backups", TimeOfDay: "02:00", GzipLevel: 6},
 		Retention: RetentionPolicy{DailyKeep: 4, WeeklyKeep: 1, MonthlyKeep: 1},
 		Servers: []ServerConfig{
 			{

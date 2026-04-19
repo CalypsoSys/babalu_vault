@@ -61,7 +61,8 @@ backup:
   root_dir: "./backups"
   log_path: "./logs/pgdrivebackup.log"
   gzip_level: 6
-  run_interval: "1h"
+  time_of_day: "02:00"
+  state_path: "./state/pgdrivebackup-scheduler.json"
 ```
 
 Backups are stored under:
@@ -92,7 +93,7 @@ Launch the continuous terminal UI:
 go run ./cmd/pgdrivebackup --config configs/example.yaml
 ```
 
-The TUI starts a backup immediately, keeps running, and schedules the next automatic backup using `backup.run_interval`.
+The TUI keeps running and schedules one automatic backup per local calendar day at `backup.time_of_day`. On startup, it checks `backup.state_path` and runs immediately if it has not already run yet that day.
 
 Launch the TUI in dry-run mode:
 
@@ -265,7 +266,11 @@ gunzip -c backup.gz | docker exec -i dev-postgres psql --username postgres --dbn
 
 ### In-app scheduler
 
-The default UI mode already runs continuously and executes scheduled backups using `backup.run_interval`. Use an external service manager only if you want the TUI process itself to start automatically after reboot or login.
+The default UI mode already runs continuously and executes one scheduled backup per local calendar day at `backup.time_of_day`.
+
+It also persists the last completed scheduled run in `backup.state_path`, so after a reboot or restart it will immediately catch up if no run has happened yet on the current local date.
+
+Use an external service manager only if you want the TUI process itself to start automatically after reboot or login.
 
 ### Windows Task Scheduler
 

@@ -4,7 +4,8 @@ backup:
   log_path: "./logs/pgdrivebackup.log"
   gzip_level: 6
   dry_run: false
-  run_interval: "1h"
+  time_of_day: "02:00"
+  state_path: "./state/pgdrivebackup-scheduler.json"
 
 retention:
   daily_keep: 4

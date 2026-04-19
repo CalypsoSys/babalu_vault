@@ -61,7 +61,8 @@ type model struct {
 	cfg           *config.Config
 	logger        *slog.Logger
 	dryRun        bool
-	interval      time.Duration
+	scheduleHour  int
+	scheduleMin   int
 	now           time.Time
 	nextRun       time.Time
 	paused        bool
@@ -82,10 +83,13 @@ type model struct {
 }
 
 func newModel(configPath string, cfg *config.Config, dryRun bool, logger *slog.Logger) model {
-	interval, err := cfg.Backup.RunIntervalDuration()
+	hour, minute, err := cfg.Backup.ScheduledTimeOfDay()
 	if err != nil {
-		interval = time.Hour
+		hour = 2
+		minute = 0
 	}
+	now := time.Now()
+	state, stateErr := loadSchedulerState(cfg.Backup.StatePath)
 
 	statuses := make([]databaseStatus, 0)
 	for _, server := range cfg.Servers {
@@ -109,32 +113,42 @@ func newModel(configPath string, cfg *config.Config, dryRun bool, logger *slog.L
 	activityVP.MouseWheelEnabled = true
 
 	m := model{
-		configPath:    configPath,
-		cfg:           cfg,
-		logger:        logger,
-		dryRun:        dryRun,
-		interval:      interval,
-		now:           time.Now(),
-		nextRun:       time.Now(),
-		running:       true,
-		currentAction: "scheduled backup",
-		statuses:      statuses,
-		focus:         focusTargets,
-		targetsVP:     targetsVP,
-		activityVP:    activityVP,
+		configPath:   configPath,
+		cfg:          cfg,
+		logger:       logger,
+		dryRun:       dryRun,
+		scheduleHour: hour,
+		scheduleMin:  minute,
+		now:          now,
+		lastRun:      state.LastRunAt,
+		statuses:     statuses,
+		focus:        focusTargets,
+		targetsVP:    targetsVP,
+		activityVP:   activityVP,
 	}
 	m.recordEvent("info", fmt.Sprintf("loaded %d database targets from %s", len(statuses), configPath))
-	m.recordEvent("info", fmt.Sprintf("scheduler armed with interval %s", interval))
+	m.recordEvent("info", fmt.Sprintf("scheduler armed for daily run at %02d:%02d", hour, minute))
+	if stateErr != nil {
+		m.recordEvent("warn", fmt.Sprintf("scheduler state unavailable: %v", stateErr))
+	}
 	if dryRun {
 		m.recordEvent("warn", "TUI dry-run mode enabled")
 	}
-	m.recordEvent("info", "scheduled backup started")
+	if shouldRunOnStartup(m.lastRun, now) {
+		m.running = true
+		m.currentAction = "scheduled backup"
+		m.recordEvent("info", "startup catch-up backup started")
+	}
+	m.nextRun = nextScheduledRun(m.lastRun, now, m.scheduleHour, m.scheduleMin)
 	m.syncViewports()
 	return m
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(tickCmd(), startBackupCmd(m.cfg, m.logger, true, m.dryRun))
+	if m.running {
+		return tea.Batch(tickCmd(), startBackupCmd(m.cfg, m.logger, true, m.dryRun))
+	}
+	return tickCmd()
 }
 
 func tickCmd() tea.Cmd {
@@ -248,7 +262,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tickMsg:
 		m.now = time.Time(msg)
-		if !m.paused && !m.running && !m.nextRun.IsZero() && !m.now.Before(m.nextRun) {
+		m.nextRun = nextScheduledRun(m.lastRun, m.now, m.scheduleHour, m.scheduleMin)
+		if !m.paused && !m.running && shouldRunScheduledBackup(m.lastRun, m.now, m.scheduleHour, m.scheduleMin) {
 			m.running = true
 			m.currentAction = "scheduled backup"
 			m.recordEvent("info", "scheduled backup started")
@@ -261,8 +276,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.running = false
 		m.currentAction = ""
 		m.lastRun = msg.finishedAt
-		m.nextRun = msg.finishedAt.Add(m.interval)
 		m.now = msg.finishedAt
+		if !(m.dryRun || m.cfg.Backup.DryRun) {
+			if err := saveSchedulerState(m.cfg.Backup.StatePath, schedulerState{LastRunAt: msg.finishedAt}); err != nil {
+				m.recordEvent("warn", fmt.Sprintf("failed to persist scheduler state: %v", err))
+				if m.lastError == "" {
+					m.lastError = err.Error()
+				}
+			}
+		}
+		m.nextRun = nextScheduledRun(m.lastRun, m.now, m.scheduleHour, m.scheduleMin)
 		if msg.err != nil {
 			m.lastError = msg.err.Error()
 			m.recordEvent("error", fmt.Sprintf("backup failed: %v", msg.err))
@@ -530,7 +553,7 @@ func renderHeaderCard(m model, palette styles) string {
 		"",
 		palette.muted.Render(fmt.Sprintf("config %s", m.configPath)),
 		palette.muted.Render(fmt.Sprintf("backup root %s", m.cfg.Backup.RootDir)),
-		palette.muted.Render(fmt.Sprintf("interval %s", m.interval)),
+		palette.muted.Render(fmt.Sprintf("daily time %02d:%02d", m.scheduleHour, m.scheduleMin)),
 		palette.muted.Render(fmt.Sprintf("dry-run %t", m.dryRun || m.cfg.Backup.DryRun)),
 	}
 	return strings.Join(lines, "\n")
