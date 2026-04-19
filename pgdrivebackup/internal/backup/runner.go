@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -42,6 +43,15 @@ type SummaryRow struct {
 type OperationEntry struct {
 	Level   string
 	Message string
+}
+
+var sensitivePatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)(PGPASSWORD=)([^\s'"]+)`),
+	regexp.MustCompile(`(?i)(password=)([^\s'"]+)`),
+	regexp.MustCompile(`(?i)(password: )([^\s'"]+)`),
+	regexp.MustCompile(`(?i)(passphrase=)([^\s'"]+)`),
+	regexp.MustCompile(`(?i)(token=)([^\s'"]+)`),
+	regexp.MustCompile(`(?i)(secret=)([^\s'"]+)`),
 }
 
 func (r *Runner) Run(ctx context.Context, serverFilter, databaseFilter string, dryRun bool) ([]SummaryRow, error) {
@@ -89,9 +99,10 @@ func (r *Runner) runOne(ctx context.Context, item config.SelectedDatabase, dryRu
 	)
 	var operations []OperationEntry
 	logOperation := func(level, message string, attrs ...slog.Attr) {
-		operations = append(operations, OperationEntry{Level: level, Message: formatOperationMessage(message, attrs...)})
+		safeAttrs := sanitizeAttrs(attrs)
+		operations = append(operations, OperationEntry{Level: level, Message: formatOperationMessage(message, safeAttrs...)})
 		args := make([]any, 0, len(attrs))
-		for _, attr := range attrs {
+		for _, attr := range safeAttrs {
 			args = append(args, attr)
 		}
 		switch level {
@@ -114,7 +125,7 @@ func (r *Runner) runOne(ctx context.Context, item config.SelectedDatabase, dryRu
 	preview, previewErr := CommandPreview(item)
 	if previewErr != nil {
 		row.Status = "error"
-		row.Error = previewErr.Error()
+		row.Error = sanitizeSensitiveString(previewErr.Error())
 		row.Duration = time.Since(start)
 		row.Operations = operations
 		logOperation("error", "backup failed", slog.Any("error", previewErr))
@@ -128,7 +139,7 @@ func (r *Runner) runOne(ctx context.Context, item config.SelectedDatabase, dryRu
 		logOperation("info", "dry-run would store daily backup", slog.String("path", row.StoredPaths[0]))
 		if err := r.logRetentionPlan(item, start, logOperation); err != nil {
 			row.Status = "error"
-			row.Error = err.Error()
+			row.Error = sanitizeSensitiveString(err.Error())
 			row.Duration = time.Since(start)
 			row.Operations = operations
 			logOperation("error", "dry-run retention planning failed", slog.Any("error", err))
@@ -142,7 +153,7 @@ func (r *Runner) runOne(ctx context.Context, item config.SelectedDatabase, dryRu
 
 	if err := r.createBackupFile(ctx, item, localPath, preview, logOperation); err != nil {
 		row.Status = "error"
-		row.Error = err.Error()
+		row.Error = sanitizeSensitiveString(err.Error())
 		row.Duration = time.Since(start)
 		row.Operations = operations
 		logOperation("error", "backup failed", slog.Any("error", err))
@@ -153,7 +164,7 @@ func (r *Runner) runOne(ctx context.Context, item config.SelectedDatabase, dryRu
 	info, err := os.Stat(localPath)
 	if err != nil {
 		row.Status = "error"
-		row.Error = fmt.Sprintf("stat backup file: %v", err)
+		row.Error = sanitizeSensitiveString(fmt.Sprintf("stat backup file: %v", err))
 		row.Duration = time.Since(start)
 		row.Operations = operations
 		logOperation("error", "backup failed", slog.Any("error", err))
@@ -164,7 +175,7 @@ func (r *Runner) runOne(ctx context.Context, item config.SelectedDatabase, dryRu
 
 	if err := r.storeAndRetain(item, localPath, filename, start, logOperation); err != nil {
 		row.Status = "error"
-		row.Error = err.Error()
+		row.Error = sanitizeSensitiveString(err.Error())
 		row.Duration = time.Since(start)
 		row.Operations = operations
 		logOperation("error", "store/retention failed", slog.Any("error", err))
@@ -397,13 +408,51 @@ func envPlaceholder(name string) string {
 
 func formatOperationMessage(message string, attrs ...slog.Attr) string {
 	if len(attrs) == 0 {
-		return message
+		return sanitizeSensitiveString(message)
 	}
-	parts := []string{message}
+	parts := []string{sanitizeSensitiveString(message)}
 	for _, attr := range attrs {
-		parts = append(parts, fmt.Sprintf("%s=%v", attr.Key, attr.Value.Any()))
+		parts = append(parts, fmt.Sprintf("%s=%v", attr.Key, sanitizeAttrValue(attr.Value.Any())))
 	}
 	return strings.Join(parts, " ")
+}
+
+func sanitizeAttrs(attrs []slog.Attr) []slog.Attr {
+	safe := make([]slog.Attr, 0, len(attrs))
+	for _, attr := range attrs {
+		safe = append(safe, sanitizeAttr(attr))
+	}
+	return safe
+}
+
+func sanitizeAttr(attr slog.Attr) slog.Attr {
+	switch attr.Value.Kind() {
+	case slog.KindString:
+		return slog.String(attr.Key, sanitizeSensitiveString(attr.Value.String()))
+	case slog.KindAny:
+		return slog.Any(attr.Key, sanitizeAttrValue(attr.Value.Any()))
+	default:
+		return attr
+	}
+}
+
+func sanitizeAttrValue(value any) any {
+	switch v := value.(type) {
+	case string:
+		return sanitizeSensitiveString(v)
+	case error:
+		return errors.New(sanitizeSensitiveString(v.Error()))
+	default:
+		return value
+	}
+}
+
+func sanitizeSensitiveString(value string) string {
+	safe := value
+	for _, pattern := range sensitivePatterns {
+		safe = pattern.ReplaceAllString(safe, `${1}***`)
+	}
+	return safe
 }
 
 func (r *Runner) storeAndRetain(item config.SelectedDatabase, localPath, filename string, now time.Time, logOperation func(string, string, ...slog.Attr)) error {
