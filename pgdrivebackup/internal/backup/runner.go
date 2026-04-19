@@ -36,6 +36,12 @@ type SummaryRow struct {
 	SizeBytes   int64
 	Duration    time.Duration
 	Error       string
+	Operations  []OperationEntry
+}
+
+type OperationEntry struct {
+	Level   string
+	Message string
 }
 
 func (r *Runner) Run(ctx context.Context, serverFilter, databaseFilter string, dryRun bool) ([]SummaryRow, error) {
@@ -81,25 +87,65 @@ func (r *Runner) runOne(ctx context.Context, item config.SelectedDatabase, dryRu
 		slog.String("database", item.Database.Name),
 		slog.String("method", method),
 	)
-	logger.Info("backup started")
+	var operations []OperationEntry
+	logOperation := func(level, message string, attrs ...slog.Attr) {
+		operations = append(operations, OperationEntry{Level: level, Message: formatOperationMessage(message, attrs...)})
+		args := make([]any, 0, len(attrs))
+		for _, attr := range attrs {
+			args = append(args, attr)
+		}
+		switch level {
+		case "error":
+			logger.Error(message, args...)
+		case "warn":
+			logger.Warn(message, args...)
+		default:
+			logger.Info(message, args...)
+		}
+	}
+	logOperation("info", "backup started")
 
 	filename := BuildFilename(item.Server.Name, item.Database.Name, start)
 	localPath := filepath.Join(r.Config.Backup.TempDir, filename)
 	row.LocalFile = localPath
 	row.StoredPaths = []string{filepath.Join(r.Config.Backup.RootDir, item.Server.Name, item.Database.Name, string(retention.TierDaily), filename)}
+	logOperation("info", "temp backup path prepared", slog.String("local_file", localPath))
+
+	preview, previewErr := CommandPreview(item)
+	if previewErr != nil {
+		row.Status = "error"
+		row.Error = previewErr.Error()
+		row.Duration = time.Since(start)
+		row.Operations = operations
+		logOperation("error", "backup failed", slog.Any("error", previewErr))
+		return row
+	}
+	logOperation("info", "backup command prepared", slog.String("command", preview))
 
 	if dryRun {
-		logger.Info("dry-run backup planned", slog.String("local_file", localPath), slog.Any("stored_paths", row.StoredPaths))
+		logOperation("warn", "dry-run command preview", slog.String("command", preview))
+		logOperation("info", "dry-run would create temp backup file", slog.String("local_file", localPath))
+		logOperation("info", "dry-run would store daily backup", slog.String("path", row.StoredPaths[0]))
+		if err := r.logRetentionPlan(item, start, logOperation); err != nil {
+			row.Status = "error"
+			row.Error = err.Error()
+			row.Duration = time.Since(start)
+			row.Operations = operations
+			logOperation("error", "dry-run retention planning failed", slog.Any("error", err))
+			return row
+		}
 		row.Status = "dry-run"
 		row.Duration = time.Since(start)
+		row.Operations = operations
 		return row
 	}
 
-	if err := r.createBackupFile(ctx, item, localPath); err != nil {
+	if err := r.createBackupFile(ctx, item, localPath, preview, logOperation); err != nil {
 		row.Status = "error"
 		row.Error = err.Error()
 		row.Duration = time.Since(start)
-		logger.Error("backup failed", slog.Any("error", err))
+		row.Operations = operations
+		logOperation("error", "backup failed", slog.Any("error", err))
 		return row
 	}
 	defer os.Remove(localPath)
@@ -109,44 +155,52 @@ func (r *Runner) runOne(ctx context.Context, item config.SelectedDatabase, dryRu
 		row.Status = "error"
 		row.Error = fmt.Sprintf("stat backup file: %v", err)
 		row.Duration = time.Since(start)
-		logger.Error("backup failed", slog.Any("error", err))
+		row.Operations = operations
+		logOperation("error", "backup failed", slog.Any("error", err))
 		return row
 	}
 	row.SizeBytes = info.Size()
+	logOperation("info", "temp backup file created", slog.Int64("size_bytes", row.SizeBytes), slog.String("local_file", localPath))
 
-	if err := r.storeAndRetain(item, localPath, filename, start); err != nil {
+	if err := r.storeAndRetain(item, localPath, filename, start, logOperation); err != nil {
 		row.Status = "error"
 		row.Error = err.Error()
 		row.Duration = time.Since(start)
-		logger.Error("store/retention failed", slog.Any("error", err))
+		row.Operations = operations
+		logOperation("error", "store/retention failed", slog.Any("error", err))
 		return row
 	}
 
 	row.Duration = time.Since(start)
-	logger.Info("backup completed", slog.String("local_file", localPath), slog.Int64("size_bytes", row.SizeBytes), slog.Duration("duration", row.Duration))
+	row.Operations = operations
+	logOperation("info", "backup completed", slog.String("local_file", localPath), slog.Int64("size_bytes", row.SizeBytes), slog.Duration("duration", row.Duration))
 	return row
 }
 
-func (r *Runner) createBackupFile(ctx context.Context, item config.SelectedDatabase, localPath string) error {
+func (r *Runner) createBackupFile(ctx context.Context, item config.SelectedDatabase, localPath, preview string, logOperation func(string, string, ...slog.Attr)) error {
 	outputFile, err := os.OpenFile(localPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return fmt.Errorf("create temp backup file: %w", err)
 	}
 	defer outputFile.Close()
+	logOperation("info", "created temp output file", slog.String("local_file", localPath))
 
 	gzipWriter, err := gzip.NewWriterLevel(outputFile, r.Config.Backup.GzipLevel)
 	if err != nil {
 		return fmt.Errorf("create gzip writer: %w", err)
 	}
+	logOperation("info", "gzip writer initialized", slog.Int("gzip_level", r.Config.Backup.GzipLevel))
 
 	cmd, stdout, stderrBuf, err := buildDumpCommand(ctx, item)
 	if err != nil {
 		return err
 	}
+	logOperation("info", "starting backup command", slog.String("command", preview))
 
 	if err := cmd.Start(); err != nil {
 		return wrapCommandStartError(item.Server.Type, err)
 	}
+	logOperation("info", "backup command started")
 
 	var wg sync.WaitGroup
 	copyErrCh := make(chan error, 1)
@@ -174,6 +228,7 @@ func (r *Runner) createBackupFile(ctx context.Context, item config.SelectedDatab
 		}
 		return fmt.Errorf("pg_dump failed: %s", msg)
 	}
+	logOperation("info", "backup command finished successfully")
 	return nil
 }
 
@@ -340,30 +395,64 @@ func envPlaceholder(name string) string {
 	return "${" + name + "}"
 }
 
-func (r *Runner) storeAndRetain(item config.SelectedDatabase, localPath, filename string, now time.Time) error {
+func formatOperationMessage(message string, attrs ...slog.Attr) string {
+	if len(attrs) == 0 {
+		return message
+	}
+	parts := []string{message}
+	for _, attr := range attrs {
+		parts = append(parts, fmt.Sprintf("%s=%v", attr.Key, attr.Value.Any()))
+	}
+	return strings.Join(parts, " ")
+}
+
+func (r *Runner) storeAndRetain(item config.SelectedDatabase, localPath, filename string, now time.Time, logOperation func(string, string, ...slog.Attr)) error {
 	dailyPath := filepath.Join(r.Config.Backup.RootDir, item.Server.Name, item.Database.Name, string(retention.TierDaily), filename)
+	logOperation("info", "storing daily backup", slog.String("source", localPath), slog.String("destination", dailyPath))
 	if err := copyFile(localPath, dailyPath); err != nil {
 		return fmt.Errorf("store daily backup: %w", err)
 	}
+	logOperation("info", "daily backup stored", slog.String("path", dailyPath))
 
 	planner := &retention.Planner{
 		RootDir: r.Config.Backup.RootDir,
 		DryRun:  false,
 	}
+	logOperation("info", "applying retention policy", slog.Int("daily_keep", item.Retention.DailyKeep), slog.Int("weekly_keep", item.Retention.WeeklyKeep), slog.Int("monthly_keep", item.Retention.MonthlyKeep))
 	if err := planner.ApplyAt(item.Server.Name, item.Database.Name, item.Retention, now); err != nil {
 		return err
 	}
 	for _, promotion := range planner.PromoteLog {
-		r.Logger.Info("retention promotion",
-			slog.String("server", item.Server.Name),
-			slog.String("database", item.Database.Name),
+		logOperation("info", "retention promotion",
 			slog.String("from_tier", string(promotion.From)),
 			slog.String("to_tier", string(promotion.To)),
 			slog.String("file", promotion.File.Name),
 		)
 	}
 	for _, deletion := range planner.DeleteLog {
-		r.Logger.Info("retention deletion", slog.String("server", item.Server.Name), slog.String("database", item.Database.Name), slog.String("tier", string(deletion.Tier)), slog.String("file", deletion.File.Name))
+		logOperation("info", "retention deletion", slog.String("tier", string(deletion.Tier)), slog.String("file", deletion.File.Name))
+	}
+	return nil
+}
+
+func (r *Runner) logRetentionPlan(item config.SelectedDatabase, now time.Time, logOperation func(string, string, ...slog.Attr)) error {
+	logOperation("info", "dry-run would apply retention policy", slog.Int("daily_keep", item.Retention.DailyKeep), slog.Int("weekly_keep", item.Retention.WeeklyKeep), slog.Int("monthly_keep", item.Retention.MonthlyKeep))
+	planner := &retention.Planner{
+		RootDir: r.Config.Backup.RootDir,
+		DryRun:  true,
+	}
+	if err := planner.ApplyAt(item.Server.Name, item.Database.Name, item.Retention, now); err != nil {
+		return err
+	}
+	for _, promotion := range planner.PromoteLog {
+		logOperation("info", "dry-run would promote backup",
+			slog.String("from_tier", string(promotion.From)),
+			slog.String("to_tier", string(promotion.To)),
+			slog.String("file", promotion.File.Name),
+		)
+	}
+	for _, deletion := range planner.DeleteLog {
+		logOperation("info", "dry-run would delete backup", slog.String("tier", string(deletion.Tier)), slog.String("file", deletion.File.Name))
 	}
 	return nil
 }

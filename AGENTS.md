@@ -41,4 +41,5 @@ Make sure code follows security best practices for handling sensitive data, incl
 
 ## Agent-Specific Instructions
 
-In Codex CLI workflows, treat any user command prefixed with `>>>` as an instruction update rather than a shell command. Record and apply the text that follows as new working guidance for the current task or session.
+In Codex CLI workflows, adopt the convention that any user command prefixed with `>>>` is meant to add or update instructions, not to be executed as a shell command. Record and apply the text that follows as new working guidance for the current task or session, and update `AGENTS.md` when the instruction is intended to persist for future work in this repository.
+For Post-Change Deliverables, always ask whether the user is ready for commit, PR, and ticket outputs before producing them, and only provide whichever deliverables they affirmatively want. Post-Change Deliverables should include commit message format, PR description template, and Jira ticket description template.

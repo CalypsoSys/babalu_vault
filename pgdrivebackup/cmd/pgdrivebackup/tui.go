@@ -128,9 +128,6 @@ func newModel(configPath string, cfg *config.Config, dryRun bool, logger *slog.L
 	if dryRun {
 		m.addEvent("warn", "TUI dry-run mode enabled")
 	}
-	if dryRun || cfg.Backup.DryRun {
-		m.seedDryRunActivity()
-	}
 	m.addEvent("info", "scheduled backup started")
 	m.syncViewports()
 	return m
@@ -279,6 +276,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		for _, row := range msg.rows {
 			m.updateStatus(row, msg.finishedAt)
+			for _, op := range row.Operations {
+				m.addEvent(op.Level, fmt.Sprintf("%s/%s [%s] %s", row.Server, row.Database, row.Method, op.Message))
+			}
 		}
 		m.syncViewports()
 		return m, nil
@@ -331,26 +331,6 @@ func (m *model) addEvent(level, message string) {
 	}}, m.events...)
 	if len(m.events) > 200 {
 		m.events = m.events[:200]
-	}
-}
-
-func (m *model) seedDryRunActivity() {
-	levels := []string{"info", "warn", "info", "info", "warn"}
-	messages := []string{
-		"dry-run preview entry: synthetic scheduler heartbeat",
-		"dry-run preview entry: weekly retention candidate would be kept",
-		"dry-run preview entry: localdev_ommadb_dev copied to daily tier",
-		"dry-run preview entry: dockerdev_app1_dev copied to weekly tier",
-		"dry-run preview entry: scroll test marker",
-	}
-	base := m.now
-	for i := 0; i < 20; i++ {
-		entryTime := base.Add(-time.Duration(i+1) * 37 * time.Second)
-		m.events = append(m.events, eventEntry{
-			At:      entryTime,
-			Level:   levels[i%len(levels)],
-			Message: fmt.Sprintf("%s %02d", messages[i%len(messages)], i+1),
-		})
 	}
 }
 
