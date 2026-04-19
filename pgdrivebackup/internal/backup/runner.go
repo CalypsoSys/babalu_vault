@@ -14,7 +14,6 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
-	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -213,21 +212,11 @@ func (r *Runner) createBackupFile(ctx context.Context, item config.SelectedDatab
 	}
 	logOperation("info", "backup command started")
 
-	var wg sync.WaitGroup
-	copyErrCh := make(chan error, 1)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		_, copyErr := io.Copy(gzipWriter, stdout)
-		if closeErr := gzipWriter.Close(); copyErr == nil && closeErr != nil {
-			copyErr = fmt.Errorf("close gzip writer: %w", closeErr)
-		}
-		copyErrCh <- copyErr
-	}()
-
+	_, copyErr := io.Copy(gzipWriter, stdout)
+	if closeErr := gzipWriter.Close(); copyErr == nil && closeErr != nil {
+		copyErr = fmt.Errorf("close gzip writer: %w", closeErr)
+	}
 	waitErr := cmd.Wait()
-	wg.Wait()
-	copyErr := <-copyErrCh
 
 	if copyErr != nil {
 		return fmt.Errorf("stream pg_dump output: %w", copyErr)
@@ -301,11 +290,7 @@ func buildDumpCommand(ctx context.Context, item config.SelectedDatabase) (*exec.
 			return nil, nil, nil, err
 		}
 
-		args := make([]string, 0, 6)
-		if item.Server.SSHPort > 0 {
-			args = append(args, "-p", fmt.Sprintf("%d", item.Server.SSHPort))
-		}
-		args = append(args, item.Server.SSHTarget, remoteCommand)
+		args := buildSSHArgs(item, remoteCommand)
 
 		cmd := exec.CommandContext(ctx, "ssh", args...)
 		cmd.Stderr = &stderr
@@ -355,6 +340,18 @@ func buildSSHRemoteCommand(item config.SelectedDatabase, password string) (strin
 	}
 }
 
+func buildSSHArgs(item config.SelectedDatabase, remoteCommand string) []string {
+	args := []string{
+		"-o", "BatchMode=yes",
+		"-o", "StrictHostKeyChecking=yes",
+	}
+	if item.Server.SSHPort > 0 {
+		args = append(args, "-p", fmt.Sprintf("%d", item.Server.SSHPort))
+	}
+	args = append(args, item.Server.SSHTarget, remoteCommand)
+	return args
+}
+
 func shellQuote(value string) string {
 	if value == "" {
 		return "''"
@@ -389,12 +386,7 @@ func CommandPreview(item config.SelectedDatabase) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		args := make([]string, 0, 6)
-		args = append(args, "ssh")
-		if item.Server.SSHPort > 0 {
-			args = append(args, "-p", fmt.Sprintf("%d", item.Server.SSHPort))
-		}
-		args = append(args, item.Server.SSHTarget, shellQuote(remoteCommand))
+		args := append([]string{"ssh"}, buildSSHArgs(item, shellQuote(remoteCommand))...)
 		return strings.Join(args, " "), nil
 	default:
 		return "", fmt.Errorf("unsupported server type %q", item.Server.Type)

@@ -164,6 +164,8 @@ docker exec -e PGPASSWORD=... CONTAINER pg_dump --format=plain --no-owner --no-a
 
 Uses the local `ssh` client to run a constrained remote `pg_dump` command and stream the dump back to this machine for local gzip storage.
 
+SSH is run in non-interactive mode for scheduler safety. The remote host key must already be trusted in your local `known_hosts` file, or the backup will fail fast instead of prompting inside the TUI.
+
 Two remote shapes are supported:
 
 - `ssh_remote_type: tcp`: run remote native `pg_dump`

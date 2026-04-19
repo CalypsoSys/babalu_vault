@@ -13,3 +13,4 @@ pgdrivebackup/*.exe
 pgdrivebackup/*.test
 
 .codex
+pgdrivebackup/configs/calypsosys.yaml

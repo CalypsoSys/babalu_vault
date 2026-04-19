@@ -81,6 +81,14 @@ func TestCommandPreviewUsesNoPasswordMode(t *testing.T) {
 		if item.Server.Type == "docker" && strings.Contains(preview, "docker exec -i") {
 			t.Fatalf("did not expect docker preview to keep stdin open: %q", preview)
 		}
+		if item.Server.Type == "ssh" {
+			if !strings.Contains(preview, "BatchMode=yes") {
+				t.Fatalf("expected ssh preview to disable interactive prompts, got %q", preview)
+			}
+			if !strings.Contains(preview, "StrictHostKeyChecking=yes") {
+				t.Fatalf("expected ssh preview to require a trusted host key, got %q", preview)
+			}
+		}
 	}
 }
 
