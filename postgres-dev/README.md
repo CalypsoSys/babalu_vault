@@ -89,13 +89,16 @@ sudo mkdir -p /srv/logs/postgres
 sudo chown 999:999 /srv/logs/postgres
 ```
 
-Example usage on a Linux host:
+Preferred installation on a Linux host:
 
 ```bash
-sudo logrotate -f /path/to/calypso_pgvault/postgres-dev/logrotate-postgres-dev.conf
+sudo cp /path/to/calypso_pgvault/postgres-dev/logrotate-postgres-dev.conf /etc/logrotate.d/postgres-dev
+sudo chown root:root /etc/logrotate.d/postgres-dev
+sudo chmod 644 /etc/logrotate.d/postgres-dev
+sudo logrotate -f /etc/logrotate.d/postgres-dev
 ```
 
-The sample config sends `USR1` to the container after rotation so PostgreSQL reopens the log file cleanly. Adjust the `create` ownership and log path if you override `POSTGRES_LOG_DIR`.
+The sample config sends `USR1` to the container after rotation so PostgreSQL reopens the log file cleanly. `logrotate` expects root-owned config when run with `sudo`, so installing the sample under `/etc/logrotate.d/` is the preferred approach. Adjust the `create` ownership and log path if you override `POSTGRES_LOG_DIR`.
 
 ## Security notes
 
