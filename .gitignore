@@ -16,3 +16,4 @@ pgdrivebackup/*.test
 pgdrivebackup/configs/calypsosys.yaml
 .cache/*
 bin/*
+pgdrivebackup/configs/state/pgdrivebackup-scheduler.json
