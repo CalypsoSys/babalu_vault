@@ -233,7 +233,10 @@ func (r *Runner) createBackupFile(ctx context.Context, item config.SelectedDatab
 }
 
 func buildDumpCommand(ctx context.Context, item config.SelectedDatabase) (*exec.Cmd, io.ReadCloser, *bytes.Buffer, error) {
-	password := os.Getenv(item.Server.PasswordEnv)
+	password, _, err := config.ResolveConfiguredSecret(item.Server.Password)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("resolve password: %w", err)
+	}
 	var stderr bytes.Buffer
 	switch item.Server.Type {
 	case "tcp":
@@ -363,11 +366,15 @@ func shellQuote(value string) string {
 }
 
 func CommandPreview(item config.SelectedDatabase) (string, error) {
+	_, placeholder, err := config.ResolveConfiguredSecret(item.Server.Password)
+	if err != nil {
+		return "", fmt.Errorf("resolve password placeholder: %w", err)
+	}
 	switch item.Server.Type {
 	case "tcp":
 		return fmt.Sprintf(
 			"PGPASSWORD=%s pg_dump --format=plain --no-owner --no-acl --no-password --host %s --port %d --username %s %s",
-			envPlaceholder(item.Server.PasswordEnv),
+			placeholder,
 			item.Server.Host,
 			item.Server.Port,
 			item.Server.Username,
@@ -376,13 +383,13 @@ func CommandPreview(item config.SelectedDatabase) (string, error) {
 	case "docker":
 		return fmt.Sprintf(
 			"docker exec -e PGPASSWORD=%s %s pg_dump --format=plain --no-owner --no-acl --no-password --username %s %s",
-			envPlaceholder(item.Server.PasswordEnv),
+			placeholder,
 			item.Server.Container,
 			item.Server.Username,
 			item.Database.Name,
 		), nil
 	case "ssh":
-		remoteCommand, err := buildSSHRemoteCommand(item, envPlaceholder(item.Server.PasswordEnv))
+		remoteCommand, err := buildSSHRemoteCommand(item, placeholder)
 		if err != nil {
 			return "", err
 		}
@@ -391,13 +398,6 @@ func CommandPreview(item config.SelectedDatabase) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported server type %q", item.Server.Type)
 	}
-}
-
-func envPlaceholder(name string) string {
-	if name == "" {
-		return "<password>"
-	}
-	return "${" + name + "}"
 }
 
 func formatOperationMessage(message string, attrs ...slog.Attr) string {

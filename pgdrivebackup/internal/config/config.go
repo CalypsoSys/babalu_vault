@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -38,7 +40,7 @@ type ServerConfig struct {
 	Host          string           `yaml:"host"`
 	Port          int              `yaml:"port"`
 	Username      string           `yaml:"username"`
-	PasswordEnv   string           `yaml:"password_env"`
+	Password      string           `yaml:"password"`
 	Container     string           `yaml:"container"`
 	SSHTarget     string           `yaml:"ssh_target"`
 	SSHPort       int              `yaml:"ssh_port"`
@@ -50,6 +52,8 @@ type DatabaseConfig struct {
 	Name      string           `yaml:"name"`
 	Retention *RetentionPolicy `yaml:"retention"`
 }
+
+var envReferencePattern = regexp.MustCompile(`^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$`)
 
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
@@ -127,6 +131,12 @@ func (c *Config) Validate() error {
 		}
 		if server.Username == "" {
 			return fmt.Errorf("server %q username is required", server.Name)
+		}
+		if server.Password == "" {
+			return fmt.Errorf("server %q password is required", server.Name)
+		}
+		if _, _, err := ResolveConfiguredSecret(server.Password); err != nil {
+			return fmt.Errorf("server %q password: %w", server.Name, err)
 		}
 		if len(server.Databases) == 0 {
 			return fmt.Errorf("server %q must have at least one database", server.Name)
@@ -232,6 +242,22 @@ func (c *Config) RetentionFor(database DatabaseConfig) RetentionPolicy {
 		r.MonthlyKeep = database.Retention.MonthlyKeep
 	}
 	return r
+}
+
+func ResolveConfiguredSecret(value string) (resolved string, placeholder string, err error) {
+	if value == "" {
+		return "", "<password>", nil
+	}
+	matches := envReferencePattern.FindStringSubmatch(value)
+	if matches == nil {
+		if strings.HasPrefix(value, "$") || strings.Contains(value, "${") {
+			return "", "", fmt.Errorf("must use exact ${VARNAME} format for environment references")
+		}
+		return value, "<password>", nil
+	}
+	name := matches[1]
+	resolved = os.Getenv(name)
+	return resolved, "${" + name + "}", nil
 }
 
 type SelectedDatabase struct {

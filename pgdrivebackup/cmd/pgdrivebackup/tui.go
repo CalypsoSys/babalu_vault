@@ -581,18 +581,42 @@ func renderSchedulerCard(m model, palette styles) string {
 		statusTone = palette.bad
 	}
 
+	successCount, failureCount := m.lastRunCounts()
+
 	lines := []string{
 		palette.section.Render("Scheduler"),
 		palette.muted.Render(strings.Repeat("─", 18)),
 		fmt.Sprintf("%s %s", palette.label.Render("state"), statusTone.Render(schedulerState)),
 		fmt.Sprintf("%s %s", palette.label.Render("next run"), nextRun),
 		fmt.Sprintf("%s %s", palette.label.Render("last run"), formatTime(m.lastRun)),
-		fmt.Sprintf("%s %d", palette.label.Render("targets"), len(m.statuses)),
+		fmt.Sprintf("%s %d  %s %d  %s %d",
+			palette.label.Render("targets"), len(m.statuses),
+			palette.good.Render("success"), successCount,
+			palette.bad.Render("failure"), failureCount,
+		),
 	}
 	if m.lastError != "" {
 		lines = append(lines, fmt.Sprintf("%s %s", palette.label.Render("error"), m.lastError))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (m model) lastRunCounts() (successCount, failureCount int) {
+	if m.lastRun.IsZero() {
+		return 0, 0
+	}
+	for _, status := range m.statuses {
+		if !status.LastRun.Equal(m.lastRun) {
+			continue
+		}
+		switch status.LastStatus {
+		case "ok", "dry-run":
+			successCount++
+		case "error":
+			failureCount++
+		}
+	}
+	return successCount, failureCount
 }
 
 func renderCommandBar(palette styles) string {

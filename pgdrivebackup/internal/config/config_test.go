@@ -26,6 +26,7 @@ servers:
     host: "localhost"
     port: 5432
     username: "postgres"
+    password: "${LOCAL_PASSWORD}"
     databases:
       - name: "app"
 `
@@ -65,6 +66,7 @@ func TestFilterAndRetentionOverride(t *testing.T) {
 				Host:     "localhost",
 				Port:     5432,
 				Username: "postgres",
+				Password: "${LOCALDEV_POSTGRES_PASSWORD}",
 				Databases: []DatabaseConfig{
 					{Name: "db1"},
 					{Name: "db2", Retention: &RetentionPolicy{DailyKeep: 30, WeeklyKeep: 12, MonthlyKeep: 24}},
@@ -92,6 +94,7 @@ func TestTimeOfDayValidation(t *testing.T) {
 				Host:     "localhost",
 				Port:     5432,
 				Username: "postgres",
+				Password: "${LOCALDEV_POSTGRES_PASSWORD}",
 				Databases: []DatabaseConfig{
 					{Name: "db1"},
 				},
@@ -117,7 +120,7 @@ func TestValidateAllowsSSHRemoteDocker(t *testing.T) {
 				SSHRemoteType: "docker",
 				Container:     "ommadb-postgres",
 				Username:      "postgres",
-				PasswordEnv:   "REMOTE_POSTGRES_PASSWORD",
+				Password:      "${REMOTE_POSTGRES_PASSWORD}",
 				Databases: []DatabaseConfig{
 					{Name: "mma_data_web"},
 				},
@@ -141,6 +144,7 @@ func TestValidateRejectsSSHWithoutTarget(t *testing.T) {
 				SSHRemoteType: "docker",
 				Container:     "ommadb-postgres",
 				Username:      "postgres",
+				Password:      "${REMOTE_POSTGRES_PASSWORD}",
 				Databases: []DatabaseConfig{
 					{Name: "mma_data_web"},
 				},
@@ -150,5 +154,29 @@ func TestValidateRejectsSSHWithoutTarget(t *testing.T) {
 
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected ssh config without ssh_target to fail validation")
+	}
+}
+
+func TestResolveConfiguredSecret(t *testing.T) {
+	t.Setenv("APP_PASSWORD", "secret")
+
+	resolved, placeholder, err := ResolveConfiguredSecret("${APP_PASSWORD}")
+	if err != nil {
+		t.Fatalf("ResolveConfiguredSecret(env) error = %v", err)
+	}
+	if resolved != "secret" || placeholder != "${APP_PASSWORD}" {
+		t.Fatalf("unexpected env secret resolution: resolved=%q placeholder=%q", resolved, placeholder)
+	}
+
+	resolved, placeholder, err = ResolveConfiguredSecret("literal")
+	if err != nil {
+		t.Fatalf("ResolveConfiguredSecret(literal) error = %v", err)
+	}
+	if resolved != "literal" || placeholder != "<password>" {
+		t.Fatalf("unexpected literal secret resolution: resolved=%q placeholder=%q", resolved, placeholder)
+	}
+
+	if _, _, err := ResolveConfiguredSecret("$APP_PASSWORD"); err == nil {
+		t.Fatal("expected invalid env reference syntax to fail")
 	}
 }

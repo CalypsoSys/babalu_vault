@@ -18,7 +18,7 @@ servers:
     host: "localhost"
     port: 5432
     username: "postgres"
-    password_env: "LOCALDEV_POSTGRES_PASSWORD"
+    password: "${LOCALDEV_POSTGRES_PASSWORD}"
     databases:
       - name: "ommadb_dev"
       - name: "wordpress_dev"
@@ -27,7 +27,7 @@ servers:
     type: "docker"
     container: "dev-postgres"
     username: "postgres"
-    password_env: "LOCALDEV_POSTGRES_PASSWORD"
+    password: "${LOCALDEV_POSTGRES_PASSWORD}"
     databases:
       - name: "app1_dev"
       - name: "app2_dev"
@@ -42,7 +42,7 @@ servers:
     ssh_remote_type: "docker"
     container: "ommadb-postgres"
     username: "postgres"
-    password_env: "REMOTE_POSTGRES_PASSWORD"
+    password: "${REMOTE_POSTGRES_PASSWORD}"
     databases:
       - name: "mma_data_web"
 
@@ -54,6 +54,6 @@ servers:
     host: "127.0.0.1"
     port: 5432
     username: "postgres"
-    password_env: "REMOTE_POSTGRES_PASSWORD"
+    password: "${REMOTE_POSTGRES_PASSWORD}"
     databases:
       - name: "reporting"

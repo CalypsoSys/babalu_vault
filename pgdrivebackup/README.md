@@ -41,7 +41,7 @@ pgdrivebackup/
 
 See `configs/example.yaml`.
 
-Database passwords are not stored in YAML. Use environment variables instead:
+Database passwords use the `password` field. For environment-backed secrets, write them as `${VARNAME}`:
 
 ```bash
 export LOCALDEV_POSTGRES_PASSWORD=local-dev-password
@@ -51,6 +51,12 @@ On Windows PowerShell:
 
 ```powershell
 $env:LOCALDEV_POSTGRES_PASSWORD="local-dev-password"
+```
+
+Example server password field:
+
+```yaml
+password: "${LOCALDEV_POSTGRES_PASSWORD}"
 ```
 
 Key config fields:
@@ -157,7 +163,7 @@ Uses the local `pg_dump` binary:
 pg_dump --format=plain --no-owner --no-acl --no-password --host HOST --port PORT --username USER DBNAME
 ```
 
-Passwords are passed through `PGPASSWORD`, not on the command line.
+Passwords are passed through `PGPASSWORD`, not on the command line. The `password` config value may be a literal or a `${VARNAME}` environment reference.
 
 ### Docker mode
 
@@ -187,7 +193,7 @@ Example YAML for remote Docker:
   ssh_remote_type: "docker"
   container: "ommadb-postgres"
   username: "postgres"
-  password_env: "REMOTE_POSTGRES_PASSWORD"
+  password: "${REMOTE_POSTGRES_PASSWORD}"
   databases:
     - name: "mma_data_web"
 ```
@@ -208,7 +214,7 @@ Example YAML for remote TCP:
   host: "127.0.0.1"
   port: 5432
   username: "postgres"
-  password_env: "REMOTE_POSTGRES_PASSWORD"
+  password: "${REMOTE_POSTGRES_PASSWORD}"
   databases:
     - name: "reporting"
 ```
