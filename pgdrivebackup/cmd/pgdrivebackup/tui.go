@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -59,6 +60,8 @@ const (
 type model struct {
 	configPath    string
 	cfg           *config.Config
+	configModTime time.Time
+	configSize    int64
 	logger        *slog.Logger
 	dryRun        bool
 	scheduleHour  int
@@ -113,18 +116,20 @@ func newModel(configPath string, cfg *config.Config, dryRun bool, logger *slog.L
 	activityVP.MouseWheelEnabled = true
 
 	m := model{
-		configPath:   configPath,
-		cfg:          cfg,
-		logger:       logger,
-		dryRun:       dryRun,
-		scheduleHour: hour,
-		scheduleMin:  minute,
-		now:          now,
-		lastRun:      state.LastRunAt,
-		statuses:     statuses,
-		focus:        focusTargets,
-		targetsVP:    targetsVP,
-		activityVP:   activityVP,
+		configPath:    configPath,
+		cfg:           cfg,
+		configModTime: configModTime(configPath),
+		configSize:    configSize(configPath),
+		logger:        logger,
+		dryRun:        dryRun,
+		scheduleHour:  hour,
+		scheduleMin:   minute,
+		now:           now,
+		lastRun:       state.LastRunAt,
+		statuses:      statuses,
+		focus:         focusTargets,
+		targetsVP:     targetsVP,
+		activityVP:    activityVP,
 	}
 	m.recordEvent("info", fmt.Sprintf("loaded %d database targets from %s", len(statuses), configPath))
 	m.recordEvent("info", fmt.Sprintf("scheduler armed for daily run at %02d:%02d", hour, minute))
@@ -262,6 +267,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tickMsg:
 		m.now = time.Time(msg)
+		m.reloadConfigIfChanged()
 		m.nextRun = nextScheduledRun(m.lastRun, m.now, m.scheduleHour, m.scheduleMin)
 		if !m.paused && !m.running && shouldRunScheduledBackup(m.lastRun, m.now, m.scheduleHour, m.scheduleMin) {
 			m.running = true
@@ -313,6 +319,44 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.targetsVP, cmd = m.targetsVP.Update(msg)
 	}
 	return m, cmd
+}
+
+func (m *model) reloadConfigIfChanged() {
+	modTime := configModTime(m.configPath)
+	size := configSize(m.configPath)
+	if modTime.Equal(m.configModTime) && size == m.configSize {
+		return
+	}
+
+	cfg, err := config.Load(m.configPath)
+	if err != nil {
+		m.configModTime = modTime
+		m.configSize = size
+		m.recordEvent("warn", fmt.Sprintf("config reload failed: %v", err))
+		return
+	}
+
+	hour, minute, err := cfg.Backup.ScheduledTimeOfDay()
+	if err != nil {
+		m.configModTime = modTime
+		m.configSize = size
+		m.recordEvent("warn", fmt.Sprintf("config reload failed: %v", err))
+		return
+	}
+
+	m.cfg = cfg
+	m.configModTime = modTime
+	m.configSize = size
+	m.scheduleHour = hour
+	m.scheduleMin = minute
+	m.statuses = reconcileStatuses(m.statuses, cfg, m.dryRun || cfg.Backup.DryRun)
+	if m.selected >= len(m.statuses) {
+		m.selected = len(m.statuses) - 1
+	}
+	if m.selected < 0 {
+		m.selected = 0
+	}
+	m.recordEvent("info", fmt.Sprintf("config reloaded from %s", m.configPath))
 }
 
 func (m *model) togglePause() {
@@ -388,6 +432,54 @@ func expandDryRunStatuses(base []databaseStatus) []databaseStatus {
 		}
 	}
 	return expanded
+}
+
+func reconcileStatuses(previous []databaseStatus, cfg *config.Config, dryRun bool) []databaseStatus {
+	byKey := make(map[string]databaseStatus, len(previous))
+	for _, status := range previous {
+		byKey[status.Server+"\x00"+status.Database] = status
+	}
+
+	statuses := make([]databaseStatus, 0)
+	for _, server := range cfg.Servers {
+		for _, database := range server.Databases {
+			key := server.Name + "\x00" + database.Name
+			status, ok := byKey[key]
+			if !ok {
+				status = databaseStatus{
+					Server:     server.Name,
+					Database:   database.Name,
+					LastStatus: "pending",
+				}
+			}
+			status.Server = server.Name
+			status.Database = database.Name
+			status.Method = server.Type
+			status.Retention = cfg.RetentionFor(database)
+			statuses = append(statuses, status)
+		}
+	}
+
+	if dryRun {
+		return expandDryRunStatuses(statuses)
+	}
+	return statuses
+}
+
+func configModTime(path string) time.Time {
+	info, err := os.Stat(path)
+	if err != nil {
+		return time.Time{}
+	}
+	return info.ModTime()
+}
+
+func configSize(path string) int64 {
+	info, err := os.Stat(path)
+	if err != nil {
+		return -1
+	}
+	return info.Size()
 }
 
 func (m *model) syncViewports() {

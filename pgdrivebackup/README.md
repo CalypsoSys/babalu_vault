@@ -101,6 +101,8 @@ go run ./cmd/pgdrivebackup --config configs/example.yaml
 
 The TUI keeps running and schedules one automatic backup per local calendar day at `backup.time_of_day`. On startup, it checks `backup.state_path` and runs immediately if it has not already run yet that day.
 
+While the TUI is running, it also watches the YAML config file for changes and reloads it automatically. Updated schedules, targets, retention settings, backup root paths, and dry-run settings are applied to future runs without restarting the app.
+
 Launch the TUI in dry-run mode:
 
 ```bash
@@ -275,6 +277,21 @@ gunzip -c backup.gz | docker exec -i dev-postgres psql --username postgres --dbn
 The default UI mode already runs continuously and executes one scheduled backup per local calendar day at `backup.time_of_day`.
 
 It also persists the last completed scheduled run in `backup.state_path`, so after a reboot or restart it will immediately catch up if no run has happened yet on the current local date.
+
+The scheduler polls the config file once per second while the TUI is active. If the file changes and the new YAML validates, the app updates the in-memory config and future runs use the new values immediately.
+
+Reload behavior is intentionally conservative:
+
+- An in-progress backup continues with the config it started with.
+- Future manual and scheduled backups use the reloaded config.
+- Existing target status rows are preserved for unchanged server/database pairs.
+- Newly added targets appear immediately with `pending` status.
+- Removed targets disappear from the target list on the next successful reload.
+- If a config edit is invalid, the app logs a reload warning and keeps using the last valid config.
+
+Current limitation:
+
+- Changing `backup.log_path` does not move the already-open TUI log writer until the process is restarted.
 
 Use an external service manager only if you want the TUI process itself to start automatically after reboot or login.
 
