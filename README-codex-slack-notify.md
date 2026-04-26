@@ -113,28 +113,15 @@ Add or adjust:
 
 ```toml
 notify = ["/home/joe/.local/bin/codex-slack-notify"]
-
-[tui]
-notifications = ["agent-turn-complete", "approval-requested"]
-notification_method = "auto"
 ```
 
 If your username is not `joe`, update the path accordingly.
 
-### 6. Run Codex inside tmux
+What these settings do:
 
-```bash
-sudo apt install tmux
-tmux new -s codex
-codex
-```
-
-Detach with `Ctrl+b`, then `d`. When Slack pings your phone, SSH back in and
-reattach:
-
-```bash
-tmux attach -t codex
-```
+- `notify = ["/home/joe/.local/bin/codex-slack-notify"]` is the external hook.
+  Codex runs that command and passes it a JSON payload, which is what sends the
+  Slack message.
 
 ## Limitations
 
@@ -143,5 +130,3 @@ tmux attach -t codex
 - For true Slack interaction you would need a real Slack bot, interactivity or
   slash commands, request signature verification, and a safe bridge back to the
   machine running Codex.
-- The simplest and safest pattern is still: Slack alert, SSH back in, reattach
-  `tmux`, continue in the terminal.
