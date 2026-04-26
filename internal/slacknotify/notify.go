@@ -142,7 +142,7 @@ func ShouldNotify(rawPayload string) (shouldNotify bool, parsed bool) {
 			return true, true
 		}
 		if strings.Contains(eventType, "turn-complete") || strings.Contains(eventType, "complete") {
-			return false, true
+			return looksLikeWaitingPrompt(last), true
 		}
 	}
 
@@ -150,17 +150,21 @@ func ShouldNotify(rawPayload string) (shouldNotify bool, parsed bool) {
 		return false, true
 	}
 
+	return looksLikeWaitingPrompt(last), true
+}
+
+func looksLikeWaitingPrompt(last string) bool {
 	for _, marker := range waitingPromptSubstrings {
 		if strings.Contains(last, marker) {
-			return true, true
+			return true
 		}
 	}
 
 	if strings.Contains(last, "?") {
-		return true, true
+		return true
 	}
 
-	return false, true
+	return false
 }
 
 func (c Client) loadSecretsEnv() error {

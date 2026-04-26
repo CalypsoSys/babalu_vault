@@ -81,6 +81,16 @@ func TestShouldNotifySkipsTurnCompleteEvent(t *testing.T) {
 	}
 }
 
+func TestShouldNotifyForTurnCompleteQuestion(t *testing.T) {
+	shouldNotify, parsed := ShouldNotify(`{"type":"agent-turn-complete","last-assistant-message":"Do you want me to run the refinement sweep around the new 8/21 momentum leader?"}`)
+	if !parsed {
+		t.Fatal("expected payload to parse")
+	}
+	if !shouldNotify {
+		t.Fatal("expected turn-complete question payload to notify")
+	}
+}
+
 func TestShouldNotifyForQuestionMessage(t *testing.T) {
 	shouldNotify, parsed := ShouldNotify(`{"type":"agent_message","last-assistant-message":"How should I handle the migration?"}`)
 	if !parsed {
@@ -215,6 +225,39 @@ func TestNotifySkipsNonBlockingMessage(t *testing.T) {
 	}
 }
 
+func TestNotifyPostsTurnCompleteQuestionMessage(t *testing.T) {
+	var gotBody slackMessage
+	httpClient := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			body, err := io.ReadAll(req.Body)
+			if err != nil {
+				t.Fatalf("ReadAll() error = %v", err)
+			}
+			if err := json.Unmarshal(body, &gotBody); err != nil {
+				t.Fatalf("json.Unmarshal() error = %v", err)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Body:       io.NopCloser(strings.NewReader("ok")),
+				Header:     make(http.Header),
+			}, nil
+		}),
+	}
+
+	t.Setenv(webhookEnvName, "https://example.test/webhook")
+
+	client := Client{HTTPClient: httpClient, EnvPath: filepath.Join(t.TempDir(), "missing")}
+	err := client.Notify(context.Background(), `{"type":"agent-turn-complete","last-assistant-message":"Do you want me to create the commit for the shared backend error-log and config cleanup changes?"}`)
+	if err != nil {
+		t.Fatalf("Notify() error = %v", err)
+	}
+
+	if gotBody.Text != "*Codex:* 'agent-turn-complete'\nDo you want me to create the commit for the shared backend error-log and config cleanup changes?" {
+		t.Fatalf("unexpected posted text %q", gotBody.Text)
+	}
+}
+
 func TestNotifyPostsApprovalRequestedMessage(t *testing.T) {
 	var gotBody slackMessage
 	httpClient := &http.Client{
@@ -245,6 +288,90 @@ func TestNotifyPostsApprovalRequestedMessage(t *testing.T) {
 
 	if gotBody.Text != "*Codex:* 'approval-requested'\nDo you want me to commit this?" {
 		t.Fatalf("unexpected posted text %q", gotBody.Text)
+	}
+}
+
+func TestPermissionRequestPayloadUsesReasonAndCommand(t *testing.T) {
+	got, err := PermissionRequestPayload(`{"cwd":"/tmp/work","reason":"Codex needs approval.","tool_name":"Bash","tool_input":{"command":"git commit -m \"hi\"","description":"ignored"}}`)
+	if err != nil {
+		t.Fatalf("PermissionRequestPayload() error = %v", err)
+	}
+
+	var payload payload
+	if err := json.Unmarshal([]byte(got), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if payload.EventType != "approval-requested" {
+		t.Fatalf("unexpected event type %q", payload.EventType)
+	}
+	if payload.CWD != "/tmp/work" {
+		t.Fatalf("unexpected cwd %q", payload.CWD)
+	}
+	if !strings.Contains(payload.LastAssistantMessage, "Codex needs approval.") {
+		t.Fatalf("unexpected last message %q", payload.LastAssistantMessage)
+	}
+	if !strings.Contains(payload.LastAssistantMessage, "Tool: Bash") {
+		t.Fatalf("unexpected last message %q", payload.LastAssistantMessage)
+	}
+	if !strings.Contains(payload.LastAssistantMessage, "Command: git commit -m \"hi\"") {
+		t.Fatalf("unexpected last message %q", payload.LastAssistantMessage)
+	}
+}
+
+func TestPermissionRequestPayloadFallsBackToDescription(t *testing.T) {
+	got, err := PermissionRequestPayload(`{"cwd":"/tmp/work","tool_name":"Shell","tool_input":{"description":"Do you want me to continue?"}}`)
+	if err != nil {
+		t.Fatalf("PermissionRequestPayload() error = %v", err)
+	}
+
+	var payload payload
+	if err := json.Unmarshal([]byte(got), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if !strings.Contains(payload.LastAssistantMessage, "Do you want me to continue?") {
+		t.Fatalf("unexpected last message %q", payload.LastAssistantMessage)
+	}
+	if !strings.Contains(payload.LastAssistantMessage, "Tool: Shell") {
+		t.Fatalf("unexpected last message %q", payload.LastAssistantMessage)
+	}
+}
+
+func TestAppendJSONLWritesModeAndPayload(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "notify.jsonl")
+	if err := AppendJSONL(path, `{"type":"agent-turn-complete","last-assistant-message":"Done?"}`, "notify"); err != nil {
+		t.Fatalf("AppendJSONL() error = %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("os.ReadFile() error = %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 log line, got %d", len(lines))
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &got); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if got["_mode"] != "notify" {
+		t.Fatalf("unexpected mode %v", got["_mode"])
+	}
+
+	payloadAny, ok := got["payload"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected payload object, got %T", got["payload"])
+	}
+	if payloadAny["type"] != "agent-turn-complete" {
+		t.Fatalf("unexpected payload type %v", payloadAny["type"])
+	}
+	if _, ok := got["_ts"]; !ok {
+		t.Fatal("expected timestamp field")
 	}
 }
 
