@@ -112,14 +112,12 @@ vi ~/.codex/config.toml
 Add or adjust:
 
 ```toml
-notify = ["/home/joe/.local/bin/codex-slack-notify"]
+notify = ["~/.local/bin/codex-slack-notify"]
 ```
-
-If your username is not `joe`, update the path accordingly.
 
 What these settings do:
 
-- `notify = ["/home/joe/.local/bin/codex-slack-notify"]` is the external hook.
+- `notify = ["~/.local/bin/codex-slack-notify"]` is the external hook.
   Codex runs that command and passes it a JSON payload, which is what sends the
   Slack message.
 

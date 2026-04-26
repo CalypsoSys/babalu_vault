@@ -27,8 +27,8 @@ If you use only `type: docker` or `type: ssh`, local PostgreSQL client tools are
 Start with:
 
 1. Read `postgres-dev/README.md`.
-2. Read [README-pgdrivebackup.md](/home/joe/code/calypso_pgvault/README-pgdrivebackup.md).
-3. Read [README-codex-slack-notify.md](/home/joe/code/calypso_pgvault/README-codex-slack-notify.md) if you want Slack alerts for Codex.
+2. Read [README-pgdrivebackup.md](README-pgdrivebackup.md).
+3. Read [README-codex-slack-notify.md](README-codex-slack-notify.md) if you want Slack alerts for Codex.
 
 ## Make Targets
 
