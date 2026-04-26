@@ -97,7 +97,7 @@ parsedGlobalFlags:
 }
 
 func defaultConfigPath() string {
-	return filepath.Join("..", "configs", "example.yaml")
+	return filepath.Join("configs", "example.yaml")
 }
 
 func runUI(configPath string, dryRun bool) error {
