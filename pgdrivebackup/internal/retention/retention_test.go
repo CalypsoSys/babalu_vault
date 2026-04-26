@@ -58,27 +58,24 @@ func TestPlannerDryRunDoesNotDelete(t *testing.T) {
 	}
 }
 
-func TestPlannerPromotesDailyToWeeklyAndWeeklyToMonthly(t *testing.T) {
+func TestPlannerCreatesWeeklySnapshotForPreviousWeek(t *testing.T) {
 	root := t.TempDir()
 	baseDir := filepath.Join(root, "local", "db")
 	if err := os.MkdirAll(baseDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	now := time.Date(2026, 4, 18, 2, 0, 0, 0, time.UTC)
+	now := time.Date(2026, 4, 27, 2, 0, 0, 0, time.UTC)
 	for _, name := range []string{
-		"daily_local_db_2026-04-18.gz",
-		"daily_local_db_2026-04-17.gz",
-		"daily_local_db_2026-04-16.gz",
-		"daily_local_db_2026-04-15.gz",
-		"daily_local_db_2026-04-10.gz",
+		"daily_local_db_2026-04-27.gz",
+		"daily_local_db_2026-04-26.gz",
+		"daily_local_db_2026-04-25.gz",
+		"daily_local_db_2026-04-24.gz",
+		"daily_local_db_2026-04-23.gz",
 	} {
 		if err := os.WriteFile(filepath.Join(baseDir, name), []byte("x"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-	}
-	if err := os.WriteFile(filepath.Join(baseDir, "weekly_local_db_2026-03-10.gz"), []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
 	}
 
 	planner := &Planner{RootDir: root}
@@ -86,13 +83,97 @@ func TestPlannerPromotesDailyToWeeklyAndWeeklyToMonthly(t *testing.T) {
 		t.Fatalf("ApplyAt() error = %v", err)
 	}
 
-	if _, err := os.Stat(filepath.Join(baseDir, "weekly_local_db_2026-04-10.gz")); err != nil {
-		t.Fatalf("expected promoted weekly file, stat error = %v", err)
+	if _, err := os.Stat(filepath.Join(baseDir, "weekly_local_db_2026-04-26.gz")); err != nil {
+		t.Fatalf("expected weekly snapshot for prior ISO week, stat error = %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(baseDir, "monthly_local_db_2026-03-10.gz")); err != nil {
-		t.Fatalf("expected promoted monthly file, stat error = %v", err)
+	if _, err := os.Stat(filepath.Join(baseDir, "daily_local_db_2026-04-26.gz")); err != nil {
+		t.Fatalf("expected source daily file to remain after weekly snapshot, stat error = %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(baseDir, "daily_local_db_2026-04-10.gz")); !os.IsNotExist(err) {
-		t.Fatalf("expected promoted daily file to leave daily tier, stat err = %v", err)
+}
+
+func TestPlannerCreatesMonthlySnapshotForPreviousMonth(t *testing.T) {
+	root := t.TempDir()
+	baseDir := filepath.Join(root, "local", "db")
+	if err := os.MkdirAll(baseDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Date(2026, 5, 2, 2, 0, 0, 0, time.UTC)
+	for _, name := range []string{
+		"daily_local_db_2026-05-02.gz",
+		"daily_local_db_2026-05-01.gz",
+		"daily_local_db_2026-04-30.gz",
+		"daily_local_db_2026-04-29.gz",
+	} {
+		if err := os.WriteFile(filepath.Join(baseDir, name), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	planner := &Planner{RootDir: root}
+	if err := planner.ApplyAt("local", "db", config.RetentionPolicy{DailyKeep: 4, WeeklyKeep: 1, MonthlyKeep: 1}, now); err != nil {
+		t.Fatalf("ApplyAt() error = %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(baseDir, "monthly_local_db_2026-04-30.gz")); err != nil {
+		t.Fatalf("expected monthly snapshot for prior calendar month, stat error = %v", err)
+	}
+}
+
+func TestPlannerBootstrapsWeeklySnapshotWhenTierEmpty(t *testing.T) {
+	root := t.TempDir()
+	baseDir := filepath.Join(root, "local", "db")
+	if err := os.MkdirAll(baseDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Date(2026, 4, 26, 2, 0, 0, 0, time.UTC)
+	for _, name := range []string{
+		"daily_local_db_2026-04-26.gz",
+		"daily_local_db_2026-04-25.gz",
+		"daily_local_db_2026-04-24.gz",
+		"daily_local_db_2026-04-23.gz",
+	} {
+		if err := os.WriteFile(filepath.Join(baseDir, name), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	planner := &Planner{RootDir: root}
+	if err := planner.ApplyAt("local", "db", config.RetentionPolicy{DailyKeep: 4, WeeklyKeep: 1, MonthlyKeep: 1}, now); err != nil {
+		t.Fatalf("ApplyAt() error = %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(baseDir, "weekly_local_db_2026-04-23.gz")); err != nil {
+		t.Fatalf("expected weekly bootstrap snapshot from oldest daily, stat error = %v", err)
+	}
+}
+
+func TestPlannerBootstrapsMonthlySnapshotWhenTierEmpty(t *testing.T) {
+	root := t.TempDir()
+	baseDir := filepath.Join(root, "local", "db")
+	if err := os.MkdirAll(baseDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Date(2026, 4, 26, 2, 0, 0, 0, time.UTC)
+	for _, name := range []string{
+		"daily_local_db_2026-04-26.gz",
+		"daily_local_db_2026-04-25.gz",
+		"daily_local_db_2026-04-24.gz",
+		"daily_local_db_2026-04-23.gz",
+	} {
+		if err := os.WriteFile(filepath.Join(baseDir, name), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	planner := &Planner{RootDir: root}
+	if err := planner.ApplyAt("local", "db", config.RetentionPolicy{DailyKeep: 4, WeeklyKeep: 1, MonthlyKeep: 1}, now); err != nil {
+		t.Fatalf("ApplyAt() error = %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(baseDir, "monthly_local_db_2026-04-23.gz")); err != nil {
+		t.Fatalf("expected monthly bootstrap snapshot from oldest daily, stat error = %v", err)
 	}
 }

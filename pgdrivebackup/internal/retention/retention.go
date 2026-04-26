@@ -114,11 +114,21 @@ func (p *Planner) ApplyAt(serverName, databaseName string, policy config.Retenti
 		return fmt.Errorf("list monthly files: %w", err)
 	}
 
-	if err := p.promoteOverflow(dailyFiles, &weeklyFiles, serverName, databaseName, policy.DailyKeep, now, 7*24*time.Hour, TierDaily, TierWeekly, baseDir); err != nil {
-		return err
+	if policy.WeeklyKeep > 0 {
+		if err := p.ensurePeriodSnapshots(dailyFiles, &weeklyFiles, serverName, databaseName, now, TierDaily, TierWeekly, baseDir); err != nil {
+			return err
+		}
+		if err := p.ensureBootstrapSnapshot(dailyFiles, &weeklyFiles, serverName, databaseName, TierDaily, TierWeekly, baseDir); err != nil {
+			return err
+		}
 	}
-	if err := p.promoteOverflow(weeklyFiles, &monthlyFiles, serverName, databaseName, policy.WeeklyKeep, now, 30*24*time.Hour, TierWeekly, TierMonthly, baseDir); err != nil {
-		return err
+	if policy.MonthlyKeep > 0 {
+		if err := p.ensurePeriodSnapshots(dailyFiles, &monthlyFiles, serverName, databaseName, now, TierDaily, TierMonthly, baseDir); err != nil {
+			return err
+		}
+		if err := p.ensureBootstrapSnapshot(dailyFiles, &monthlyFiles, serverName, databaseName, TierDaily, TierMonthly, baseDir); err != nil {
+			return err
+		}
 	}
 
 	dailyFiles, err = ListLocalFiles(baseDir)
@@ -175,10 +185,10 @@ func ListLocalFiles(dir string) ([]LocalFile, error) {
 	return files, nil
 }
 
-func (p *Planner) promoteOverflow(sourceFiles []LocalFile, destFiles *[]LocalFile, serverName, databaseName string, keep int, now time.Time, minAge time.Duration, fromTier, toTier Tier, destDir string) error {
-	overflow := overflowCandidates(sourceFiles, keep, fromTier, serverName, databaseName)
-	for _, candidate := range overflow {
-		if now.Sub(candidate.Time) < minAge {
+func (p *Planner) ensurePeriodSnapshots(sourceFiles []LocalFile, destFiles *[]LocalFile, serverName, databaseName string, now time.Time, fromTier, toTier Tier, destDir string) error {
+	candidates := managedCandidates(sourceFiles, fromTier, serverName, databaseName)
+	for _, candidate := range candidates {
+		if !isPastTierPeriod(candidate.Time, now, toTier) {
 			continue
 		}
 		if hasPeriodAt(*destFiles, toTier, candidate.Time, serverName, databaseName) {
@@ -196,7 +206,7 @@ func (p *Planner) promoteOverflow(sourceFiles []LocalFile, destFiles *[]LocalFil
 			*destFiles = append(*destFiles, LocalFile{Path: destPath, Name: destName})
 			continue
 		}
-		if err := moveFile(candidate.File.Path, destPath); err != nil {
+		if err := copyFile(candidate.File.Path, destPath); err != nil {
 			return fmt.Errorf("promote %s backup %s to %s: %w", fromTier, candidate.File.Name, toTier, err)
 		}
 		*destFiles = append(*destFiles, LocalFile{Path: destPath, Name: destName})
@@ -204,19 +214,33 @@ func (p *Planner) promoteOverflow(sourceFiles []LocalFile, destFiles *[]LocalFil
 	return nil
 }
 
-func overflowCandidates(files []LocalFile, keep int, tier Tier, serverName, databaseName string) []Candidate {
-	if keep < 0 {
-		keep = 0
-	}
-	candidates := managedCandidates(files, tier, serverName, databaseName)
-	if len(candidates) <= keep {
+func (p *Planner) ensureBootstrapSnapshot(sourceFiles []LocalFile, destFiles *[]LocalFile, serverName, databaseName string, fromTier, toTier Tier, destDir string) error {
+	if len(managedCandidates(*destFiles, toTier, serverName, databaseName)) > 0 {
 		return nil
 	}
-	overflow := append([]Candidate(nil), candidates[keep:]...)
-	sort.Slice(overflow, func(i, j int) bool {
-		return overflow[i].Time.Before(overflow[j].Time)
+
+	candidates := managedCandidates(sourceFiles, fromTier, serverName, databaseName)
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	candidate := candidates[len(candidates)-1]
+	destName := buildManagedFilename(toTier, serverName, databaseName, candidate.Time)
+	destPath := filepath.Join(destDir, destName)
+	p.PromoteLog = append(p.PromoteLog, Promotion{
+		From: fromTier,
+		To:   toTier,
+		File: LocalFile{Path: destPath, Name: destName},
 	})
-	return overflow
+	if p.DryRun {
+		*destFiles = append(*destFiles, LocalFile{Path: destPath, Name: destName})
+		return nil
+	}
+	if err := copyFile(candidate.File.Path, destPath); err != nil {
+		return fmt.Errorf("bootstrap %s backup %s to %s: %w", fromTier, candidate.File.Name, toTier, err)
+	}
+	*destFiles = append(*destFiles, LocalFile{Path: destPath, Name: destName})
+	return nil
 }
 
 func managedCandidates(files []LocalFile, tier Tier, serverName, databaseName string) []Candidate {
@@ -246,6 +270,19 @@ func hasPeriodAt(files []LocalFile, tier Tier, ts time.Time, serverName, databas
 	return false
 }
 
+func isPastTierPeriod(candidateTime, now time.Time, tier Tier) bool {
+	switch tier {
+	case TierWeekly:
+		cy, cw := candidateTime.ISOWeek()
+		ny, nw := now.ISOWeek()
+		return cy != ny || cw != nw
+	case TierMonthly:
+		return candidateTime.Year() != now.Year() || candidateTime.Month() != now.Month()
+	default:
+		return false
+	}
+}
+
 func samePeriod(filename string, tier Tier, ts time.Time, serverName, databaseName string) bool {
 	fileTier, fileTime, ok := parseManagedFile(filename, serverName, databaseName)
 	if !ok {
@@ -266,12 +303,9 @@ func samePeriod(filename string, tier Tier, ts time.Time, serverName, databaseNa
 	}
 }
 
-func moveFile(src, dst string) error {
+func copyFile(src, dst string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
-	}
-	if err := os.Rename(src, dst); err == nil {
-		return nil
 	}
 
 	in, err := os.Open(src)
@@ -291,7 +325,7 @@ func moveFile(src, dst string) error {
 	if err := out.Close(); err != nil {
 		return err
 	}
-	return os.Remove(src)
+	return nil
 }
 
 func parseManagedFile(filename, serverName, databaseName string) (Tier, time.Time, bool) {
