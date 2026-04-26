@@ -5,15 +5,14 @@
 .DS_Store
 
 postgres-dev/.env
-pgdrivebackup/secrets/
-pgdrivebackup/tmp/
-pgdrivebackup/bin/
-pgdrivebackup/dist/
-pgdrivebackup/*.exe
-pgdrivebackup/*.test
+secrets/
+tmp/
+dist/
+*.exe
+*.test
 
 .codex
-pgdrivebackup/configs/calypsosys.yaml
 .cache/*
 bin/*
-pgdrivebackup/configs/state/pgdrivebackup-scheduler.json
+configs/calypsosys.yaml
+configs/state/

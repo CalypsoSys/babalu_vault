@@ -22,7 +22,6 @@ It supports:
 ```text
 configs/
   example.yaml
-  calypsosys.yaml
 cmd/pgdrivebackup/main.go
 internal/config/
 internal/backup/
