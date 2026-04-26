@@ -19,6 +19,20 @@ const (
 	webhookEnvName       = "SLACK_CODEX_WEBHOOK_URL"
 )
 
+var waitingPromptSubstrings = []string{
+	"do you want",
+	"would you like",
+	"how should i",
+	"which option",
+	"which do you want",
+	"which would you like",
+	"are you ready",
+	"can you confirm",
+	"please confirm",
+	"waiting for your answer",
+	"waiting for your response",
+}
+
 type payload struct {
 	EventType            string `json:"type"`
 	CWD                  string `json:"cwd"`
@@ -44,9 +58,20 @@ func (c Client) Notify(ctx context.Context, rawPayload string) error {
 		return nil
 	}
 
+	shouldNotify, parsed := ShouldNotify(rawPayload)
+	if !shouldNotify {
+		return nil
+	}
+
 	body, err := BuildMessage(rawPayload)
 	if err != nil {
 		return err
+	}
+	if !parsed {
+		body, err = json.Marshal(slackMessage{Text: defaultAttentionText})
+		if err != nil {
+			return fmt.Errorf("marshal slack message: %w", err)
+		}
 	}
 
 	client := c.HTTPClient
@@ -101,6 +126,41 @@ func BuildMessage(rawPayload string) ([]byte, error) {
 		return nil, fmt.Errorf("marshal slack message: %w", err)
 	}
 	return body, nil
+}
+
+func ShouldNotify(rawPayload string) (shouldNotify bool, parsed bool) {
+	var in payload
+	if err := json.Unmarshal([]byte(rawPayload), &in); err != nil {
+		return false, false
+	}
+
+	eventType := strings.ToLower(strings.TrimSpace(in.EventType))
+	last := strings.ToLower(strings.TrimSpace(in.LastAssistantMessage))
+
+	if eventType != "" {
+		if strings.Contains(eventType, "approval") || strings.Contains(eventType, "attention") {
+			return true, true
+		}
+		if strings.Contains(eventType, "turn-complete") || strings.Contains(eventType, "complete") {
+			return false, true
+		}
+	}
+
+	if last == "" {
+		return false, true
+	}
+
+	for _, marker := range waitingPromptSubstrings {
+		if strings.Contains(last, marker) {
+			return true, true
+		}
+	}
+
+	if strings.Contains(last, "?") {
+		return true, true
+	}
+
+	return false, true
 }
 
 func (c Client) loadSecretsEnv() error {

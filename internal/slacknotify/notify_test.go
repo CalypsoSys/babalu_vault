@@ -61,6 +61,56 @@ func TestBuildMessageTruncatesLongAssistantMessage(t *testing.T) {
 	}
 }
 
+func TestShouldNotifyForApprovalRequestedEvent(t *testing.T) {
+	shouldNotify, parsed := ShouldNotify(`{"type":"approval-requested","last-assistant-message":"Do you want me to commit this?"}`)
+	if !parsed {
+		t.Fatal("expected payload to parse")
+	}
+	if !shouldNotify {
+		t.Fatal("expected approval-requested payload to notify")
+	}
+}
+
+func TestShouldNotifySkipsTurnCompleteEvent(t *testing.T) {
+	shouldNotify, parsed := ShouldNotify(`{"type":"agent-turn-complete","last-assistant-message":"Done."}`)
+	if !parsed {
+		t.Fatal("expected payload to parse")
+	}
+	if shouldNotify {
+		t.Fatal("expected turn-complete payload to be skipped")
+	}
+}
+
+func TestShouldNotifyForQuestionMessage(t *testing.T) {
+	shouldNotify, parsed := ShouldNotify(`{"type":"agent_message","last-assistant-message":"How should I handle the migration?"}`)
+	if !parsed {
+		t.Fatal("expected payload to parse")
+	}
+	if !shouldNotify {
+		t.Fatal("expected question payload to notify")
+	}
+}
+
+func TestShouldNotifySkipsNonQuestionAgentMessage(t *testing.T) {
+	shouldNotify, parsed := ShouldNotify(`{"type":"agent_message","last-assistant-message":"I am updating the docs now."}`)
+	if !parsed {
+		t.Fatal("expected payload to parse")
+	}
+	if shouldNotify {
+		t.Fatal("expected non-question agent message to be skipped")
+	}
+}
+
+func TestShouldNotifySkipsInvalidJSON(t *testing.T) {
+	shouldNotify, parsed := ShouldNotify("{")
+	if parsed {
+		t.Fatal("expected invalid payload to fail parsing")
+	}
+	if shouldNotify {
+		t.Fatal("expected invalid payload to be skipped")
+	}
+}
+
 func TestLoadEnvFileSupportsExportSyntaxAndQuotes(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "env")
@@ -96,7 +146,7 @@ func TestNotifySkipsWhenWebhookMissing(t *testing.T) {
 	}
 }
 
-func TestNotifyPostsBuiltMessage(t *testing.T) {
+func TestNotifyPostsQuestionMessage(t *testing.T) {
 	var gotRequest *http.Request
 	var gotBody slackMessage
 
@@ -122,7 +172,7 @@ func TestNotifyPostsBuiltMessage(t *testing.T) {
 	t.Setenv(webhookEnvName, "https://example.test/webhook")
 
 	client := Client{HTTPClient: httpClient, EnvPath: filepath.Join(t.TempDir(), "missing")}
-	if err := client.Notify(context.Background(), `{"type":"complete","last-assistant-message":"Ready"}`); err != nil {
+	if err := client.Notify(context.Background(), `{"type":"agent_message","last-assistant-message":"How should I proceed?"}`); err != nil {
 		t.Fatalf("Notify() error = %v", err)
 	}
 
@@ -135,7 +185,65 @@ func TestNotifyPostsBuiltMessage(t *testing.T) {
 	if gotRequest.Header.Get("Content-Type") != "application/json" {
 		t.Fatalf("expected application/json content type, got %q", gotRequest.Header.Get("Content-Type"))
 	}
-	if gotBody.Text != "*Codex:* 'complete'\nReady" {
+	if gotBody.Text != "*Codex:* 'agent_message'\nHow should I proceed?" {
+		t.Fatalf("unexpected posted text %q", gotBody.Text)
+	}
+}
+
+func TestNotifySkipsNonBlockingMessage(t *testing.T) {
+	called := false
+	httpClient := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			called = true
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Body:       io.NopCloser(strings.NewReader("ok")),
+				Header:     make(http.Header),
+			}, nil
+		}),
+	}
+
+	t.Setenv(webhookEnvName, "https://example.test/webhook")
+
+	client := Client{HTTPClient: httpClient, EnvPath: filepath.Join(t.TempDir(), "missing")}
+	if err := client.Notify(context.Background(), `{"type":"agent-turn-complete","last-assistant-message":"Done."}`); err != nil {
+		t.Fatalf("Notify() error = %v", err)
+	}
+	if called {
+		t.Fatal("expected no webhook request for non-blocking message")
+	}
+}
+
+func TestNotifyPostsApprovalRequestedMessage(t *testing.T) {
+	var gotBody slackMessage
+	httpClient := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			body, err := io.ReadAll(req.Body)
+			if err != nil {
+				t.Fatalf("ReadAll() error = %v", err)
+			}
+			if err := json.Unmarshal(body, &gotBody); err != nil {
+				t.Fatalf("json.Unmarshal() error = %v", err)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Body:       io.NopCloser(strings.NewReader("ok")),
+				Header:     make(http.Header),
+			}, nil
+		}),
+	}
+
+	t.Setenv(webhookEnvName, "https://example.test/webhook")
+
+	client := Client{HTTPClient: httpClient, EnvPath: filepath.Join(t.TempDir(), "missing")}
+	err := client.Notify(context.Background(), `{"type":"approval-requested","last-assistant-message":"Do you want me to commit this?"}`)
+	if err != nil {
+		t.Fatalf("Notify() error = %v", err)
+	}
+
+	if gotBody.Text != "*Codex:* 'approval-requested'\nDo you want me to commit this?" {
 		t.Fatalf("unexpected posted text %q", gotBody.Text)
 	}
 }

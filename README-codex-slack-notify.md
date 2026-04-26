@@ -1,7 +1,8 @@
 # codex-slack-notify
 
-`codex-slack-notify` is a small Go executable that posts Codex completion or
-attention alerts to a Slack incoming webhook.
+`codex-slack-notify` is a small Go executable that posts only the Codex alerts
+that need your response, such as approval requests or direct questions, to a
+Slack incoming webhook.
 
 It accepts the Codex JSON payload as its first argument, looks for
 `SLACK_CODEX_WEBHOOK_URL` in the environment, and also loads
@@ -32,8 +33,9 @@ make build-slack-notify-windows
 
 ## Workflow
 
-This notifier is meant for "Codex finished" or "Codex needs attention" phone
-alerts. It does not make Slack a two-way Codex control surface.
+This notifier is meant for "Codex is waiting on you" phone alerts. It ignores
+normal progress and turn-complete updates, and it does not make Slack a two-way
+Codex control surface.
 
 ```text
 Codex in tmux -> codex-slack-notify -> Slack channel -> phone alert -> SSH back in -> tmux attach
@@ -117,8 +119,9 @@ Windows PowerShell:
 & "$HOME\bin\codex-slack-notify.exe" '{"type":"test","last-assistant-message":"Slack test from codex-slack-notify","cwd":"C:\\Temp"}'
 ```
 
-You should see a message in your Slack channel. On your phone, set that channel
-to notify you for all new messages if you want reliable attention pings.
+You should see a message in your Slack channel when the payload looks like
+Codex is waiting for your answer. On your phone, set that channel to notify you
+for all new messages if you want reliable attention pings.
 
 ### 5. Configure Codex
 
@@ -139,12 +142,20 @@ Add or adjust:
 
 ```toml
 notify = ["~/.local/bin/codex-slack-notify"]
+
+[tui]
+notifications = ["approval-requested", "agent-turn-complete"]
+notification_method = "auto"
 ```
 
 Windows example:
 
 ```toml
 notify = ["C:\\Users\\YOURNAME\\bin\\codex-slack-notify.exe"]
+
+[tui]
+notifications = ["approval-requested", "agent-turn-complete"]
+notification_method = "auto"
 ```
 
 What these settings do:
@@ -154,6 +165,22 @@ What these settings do:
   Slack message.
 - `notify = ["C:\\Users\\YOURNAME\\bin\\codex-slack-notify.exe"]` does the
   same thing on Windows without any PowerShell wrapper.
+- `notifications = ["approval-requested", "agent-turn-complete"]` tells Codex
+  to emit both approval prompts and general turn notifications through its TUI
+  notification pipeline.
+- `notification_method = "auto"` lets Codex use its normal local notification
+  mechanism while still invoking the external notify hook.
+
+With this setup, the external Slack hook is intended to surface only the cases
+where Codex is waiting on you:
+
+- approval prompts such as "Do you want me to run this command?"
+- clarification or decision questions such as "How should I handle this?"
+- not routine progress updates or ordinary completions
+
+Restart Codex after changing `~/.codex/config.toml` or the Windows
+`C:\Users\YOURNAME\.codex\config.toml` file so the updated notification
+settings take effect.
 
 ## Limitations
 
