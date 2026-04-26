@@ -8,7 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/CalypsoSys/babalu_vault/internal/backup"
 	"github.com/CalypsoSys/babalu_vault/internal/config"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestReconcileStatusesPreservesExistingResults(t *testing.T) {
@@ -124,5 +126,64 @@ servers:
 	}
 	if m.statuses[1].Database != "audit" || m.statuses[1].LastStatus != "pending" {
 		t.Fatalf("expected new target to start pending, got %+v", m.statuses[1])
+	}
+}
+
+func TestBackupProgressMarksMatchingTargetRunning(t *testing.T) {
+	m := model{
+		statuses: []databaseStatus{
+			{
+				Server:     "local",
+				Database:   "app",
+				Method:     "tcp",
+				LastStatus: "pending",
+			},
+		},
+	}
+
+	m.markStatusRunning(backup.SummaryRow{
+		Server:   "local",
+		Database: "app",
+		Method:   "tcp",
+		Status:   "running",
+	})
+
+	if m.statuses[0].LastStatus != "running" {
+		t.Fatalf("expected target to become running, got %+v", m.statuses[0])
+	}
+}
+
+func TestBackupFinishedSkipsDuplicateStartedActivity(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	m := newModel("configs/example.yaml", &config.Config{}, false, logger)
+	m.running = true
+	m.backupMsgs = make(chan tea.Msg, 1)
+
+	updated, _ := m.Update(backupFinishedMsg{
+		rows: []backup.SummaryRow{
+			{
+				Server:   "local",
+				Database: "app",
+				Method:   "tcp",
+				Status:   "ok",
+				Operations: []backup.OperationEntry{
+					{Level: "info", Message: "backup started"},
+					{Level: "info", Message: "backup completed"},
+				},
+			},
+		},
+		startedAt:  time.Date(2026, 4, 26, 9, 0, 0, 0, time.UTC),
+		finishedAt: time.Date(2026, 4, 26, 9, 0, 2, 0, time.UTC),
+	})
+	got := updated.(model)
+
+	count := 0
+	for _, event := range got.events {
+		if event.Message == "local/app [tcp] backup started" {
+			count++
+		}
+	}
+	if count != 0 {
+		t.Fatalf("expected completed update to skip duplicate started event, got %d", count)
 	}
 }

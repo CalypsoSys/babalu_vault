@@ -17,6 +17,12 @@ import (
 
 type tickMsg time.Time
 
+type backupProgressMsg struct {
+	row backup.SummaryRow
+}
+
+type backupStreamClosedMsg struct{}
+
 type backupFinishedMsg struct {
 	rows       []backup.SummaryRow
 	err        error
@@ -83,6 +89,7 @@ type model struct {
 	focus         focusArea
 	targetsVP     viewport.Model
 	activityVP    viewport.Model
+	backupMsgs    chan tea.Msg
 }
 
 func newModel(configPath string, cfg *config.Config, dryRun bool, logger *slog.Logger) model {
@@ -142,6 +149,7 @@ func newModel(configPath string, cfg *config.Config, dryRun bool, logger *slog.L
 	if shouldRunOnStartup(m.lastRun, now) {
 		m.running = true
 		m.currentAction = "scheduled backup"
+		m.backupMsgs = make(chan tea.Msg, 1)
 		m.recordEvent("info", "startup catch-up backup started")
 	}
 	m.nextRun = nextScheduledRun(m.lastRun, now, m.scheduleHour, m.scheduleMin)
@@ -151,7 +159,7 @@ func newModel(configPath string, cfg *config.Config, dryRun bool, logger *slog.L
 
 func (m model) Init() tea.Cmd {
 	if m.running {
-		return tea.Batch(tickCmd(), startBackupCmd(m.cfg, m.logger, true, m.dryRun))
+		return tea.Batch(tickCmd(), waitBackupMsgCmd(m.backupMsgs), runBackupCmd(m.backupMsgs, m.cfg, m.logger, true, m.dryRun))
 	}
 	return tickCmd()
 }
@@ -162,17 +170,31 @@ func tickCmd() tea.Cmd {
 	})
 }
 
-func startBackupCmd(cfg *config.Config, logger *slog.Logger, automatic bool, dryRun bool) tea.Cmd {
+func waitBackupMsgCmd(msgs <-chan tea.Msg) tea.Cmd {
+	return func() tea.Msg {
+		msg, ok := <-msgs
+		if !ok {
+			return backupStreamClosedMsg{}
+		}
+		return msg
+	}
+}
+
+func runBackupCmd(msgs chan<- tea.Msg, cfg *config.Config, logger *slog.Logger, automatic bool, dryRun bool) tea.Cmd {
 	return func() tea.Msg {
 		started := time.Now()
-		rows, err := executeBackup(logger, cfg, "", "", dryRun || cfg.Backup.DryRun)
-		return backupFinishedMsg{
+		rows, err := executeBackupWithProgress(logger, cfg, "", "", dryRun || cfg.Backup.DryRun, func(row backup.SummaryRow) {
+			msgs <- backupProgressMsg{row: row}
+		})
+		msgs <- backupFinishedMsg{
 			rows:       rows,
 			err:        err,
 			startedAt:  started,
 			finishedAt: time.Now(),
 			automatic:  automatic,
 		}
+		close(msgs)
+		return nil
 	}
 }
 
@@ -197,9 +219,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if !m.running {
 					m.running = true
 					m.currentAction = "manual backup"
+					m.backupMsgs = make(chan tea.Msg, 1)
 					m.recordEvent("info", "manual backup started")
 					m.syncViewports()
-					return m, startBackupCmd(m.cfg, m.logger, false, m.dryRun)
+					return m, tea.Batch(waitBackupMsgCmd(m.backupMsgs), runBackupCmd(m.backupMsgs, m.cfg, m.logger, false, m.dryRun))
 				}
 			case "p":
 				m.showPalette = false
@@ -240,9 +263,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !m.running {
 				m.running = true
 				m.currentAction = "manual backup"
+				m.backupMsgs = make(chan tea.Msg, 1)
 				m.recordEvent("info", "manual backup started")
 				m.syncViewports()
-				return m, startBackupCmd(m.cfg, m.logger, false, m.dryRun)
+				return m, tea.Batch(waitBackupMsgCmd(m.backupMsgs), runBackupCmd(m.backupMsgs, m.cfg, m.logger, false, m.dryRun))
 			}
 		case "p":
 			m.togglePause()
@@ -272,15 +296,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.paused && !m.running && shouldRunScheduledBackup(m.lastRun, m.now, m.scheduleHour, m.scheduleMin) {
 			m.running = true
 			m.currentAction = "scheduled backup"
+			m.backupMsgs = make(chan tea.Msg, 1)
 			m.recordEvent("info", "scheduled backup started")
 			m.syncViewports()
-			return m, tea.Batch(tickCmd(), startBackupCmd(m.cfg, m.logger, true, m.dryRun))
+			return m, tea.Batch(tickCmd(), waitBackupMsgCmd(m.backupMsgs), runBackupCmd(m.backupMsgs, m.cfg, m.logger, true, m.dryRun))
 		}
 		m.syncViewports()
 		return m, tickCmd()
+	case backupProgressMsg:
+		m.markStatusRunning(msg.row)
+		m.addActivity("info", fmt.Sprintf("%s/%s [%s] backup started", msg.row.Server, msg.row.Database, msg.row.Method))
+		m.syncViewports()
+		if m.backupMsgs != nil {
+			return m, waitBackupMsgCmd(m.backupMsgs)
+		}
+		return m, nil
 	case backupFinishedMsg:
 		m.running = false
 		m.currentAction = ""
+		m.backupMsgs = nil
 		m.lastRun = msg.finishedAt
 		m.now = msg.finishedAt
 		if !(m.dryRun || m.cfg.Backup.DryRun) {
@@ -306,10 +340,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for _, row := range msg.rows {
 			m.updateStatus(row, msg.finishedAt)
 			for _, op := range row.Operations {
+				if op.Message == "backup started" {
+					continue
+				}
 				m.addActivity(op.Level, fmt.Sprintf("%s/%s [%s] %s", row.Server, row.Database, row.Method, op.Message))
 			}
 		}
 		m.syncViewports()
+		return m, nil
+	case backupStreamClosedMsg:
 		return m, nil
 	}
 
@@ -385,6 +424,16 @@ func (m *model) updateStatus(row backup.SummaryRow, at time.Time) {
 			m.statuses[i].LastError = row.Error
 			m.statuses[i].LastPaths = row.StoredPaths
 			m.statuses[i].LastElapsed = row.Duration
+			return
+		}
+	}
+}
+
+func (m *model) markStatusRunning(row backup.SummaryRow) {
+	for i := range m.statuses {
+		if m.statuses[i].Server == row.Server && m.statuses[i].Database == row.Database {
+			m.statuses[i].LastStatus = "running"
+			m.statuses[i].Method = row.Method
 			return
 		}
 	}
@@ -797,6 +846,8 @@ func (m model) statusStyle(status string) lipgloss.Style {
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
 	case "pending", "dry-run":
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+	case "running":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("51"))
 	default:
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
 	}

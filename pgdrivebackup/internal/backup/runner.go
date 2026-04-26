@@ -22,8 +22,9 @@ import (
 )
 
 type Runner struct {
-	Config *config.Config
-	Logger *slog.Logger
+	Config   *config.Config
+	Logger   *slog.Logger
+	Progress func(SummaryRow)
 }
 
 type SummaryRow struct {
@@ -119,6 +120,14 @@ func (r *Runner) runOne(ctx context.Context, item config.SelectedDatabase, dryRu
 	localPath := filepath.Join(r.Config.Backup.TempDir, filename)
 	row.LocalFile = localPath
 	row.StoredPaths = []string{filepath.Join(r.Config.Backup.RootDir, item.Server.Name, item.Database.Name, filename)}
+	r.emitProgress(SummaryRow{
+		Server:      row.Server,
+		Database:    row.Database,
+		Method:      row.Method,
+		Status:      "running",
+		LocalFile:   row.LocalFile,
+		StoredPaths: append([]string(nil), row.StoredPaths...),
+	})
 	logOperation("info", "temp backup path prepared", slog.String("local_file", localPath))
 
 	preview, previewErr := CommandPreview(item)
@@ -185,6 +194,13 @@ func (r *Runner) runOne(ctx context.Context, item config.SelectedDatabase, dryRu
 	row.Operations = operations
 	logOperation("info", "backup completed", slog.String("local_file", localPath), slog.Int64("size_bytes", row.SizeBytes), slog.Duration("duration", row.Duration))
 	return row
+}
+
+func (r *Runner) emitProgress(row SummaryRow) {
+	if r.Progress == nil {
+		return
+	}
+	r.Progress(row)
 }
 
 func (r *Runner) createBackupFile(ctx context.Context, item config.SelectedDatabase, localPath, preview string, logOperation func(string, string, ...slog.Attr)) error {

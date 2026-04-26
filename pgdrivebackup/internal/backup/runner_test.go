@@ -1,7 +1,9 @@
 package backup
 
 import (
+	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"strings"
 	"testing"
@@ -89,6 +91,47 @@ func TestCommandPreviewUsesNoPasswordMode(t *testing.T) {
 				t.Fatalf("expected ssh preview to require a trusted host key, got %q", preview)
 			}
 		}
+	}
+}
+
+func TestRunOneEmitsRunningProgress(t *testing.T) {
+	var progress []SummaryRow
+	runner := &Runner{
+		Config: &config.Config{
+			Backup: config.BackupConfig{
+				RootDir: t.TempDir(),
+				TempDir: t.TempDir(),
+			},
+		},
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Progress: func(row SummaryRow) {
+			progress = append(progress, row)
+		},
+	}
+
+	row := runner.runOne(context.Background(), config.SelectedDatabase{
+		Server: config.ServerConfig{
+			Name:     "local",
+			Type:     "tcp",
+			Host:     "localhost",
+			Port:     5432,
+			Username: "postgres",
+			Password: "${MISSING_PASSWORD}",
+		},
+		Database: config.DatabaseConfig{Name: "app"},
+	}, false)
+
+	if row.Status != "error" {
+		t.Fatalf("expected preview failure to end in error, got %+v", row)
+	}
+	if len(progress) != 1 {
+		t.Fatalf("expected 1 progress event, got %d", len(progress))
+	}
+	if progress[0].Status != "running" {
+		t.Fatalf("expected running progress status, got %+v", progress[0])
+	}
+	if progress[0].Server != "local" || progress[0].Database != "app" {
+		t.Fatalf("unexpected progress target %+v", progress[0])
 	}
 }
 

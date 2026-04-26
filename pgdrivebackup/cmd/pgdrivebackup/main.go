@@ -159,9 +159,14 @@ func runBackup(logger *slog.Logger, configPath string, args []string) error {
 }
 
 func executeBackup(logger *slog.Logger, cfg *config.Config, serverName, databaseName string, dryRun bool) ([]backup.SummaryRow, error) {
+	return executeBackupWithProgress(logger, cfg, serverName, databaseName, dryRun, nil)
+}
+
+func executeBackupWithProgress(logger *slog.Logger, cfg *config.Config, serverName, databaseName string, dryRun bool, progress func(backup.SummaryRow)) ([]backup.SummaryRow, error) {
 	runner := &backup.Runner{
-		Config: cfg,
-		Logger: logger,
+		Config:   cfg,
+		Logger:   logger,
+		Progress: progress,
 	}
 	return runner.Run(context.Background(), serverName, databaseName, dryRun)
 }
