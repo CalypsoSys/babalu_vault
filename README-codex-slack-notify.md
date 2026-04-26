@@ -24,6 +24,12 @@ Or from the repo root:
 make build-slack-notify
 ```
 
+To also produce a Windows binary:
+
+```bash
+make build-slack-notify-windows
+```
+
 ## Workflow
 
 This notifier is meant for "Codex finished" or "Codex needs attention" phone
@@ -85,10 +91,18 @@ echo "$SLACK_CODEX_WEBHOOK_URL"
 
 ### 3. Install the notifier somewhere stable
 
+Linux/macOS:
+
 ```bash
 mkdir -p ~/.local/bin
 go build -o ~/.local/bin/codex-slack-notify ./cmd/codex-slack-notify
 chmod +x ~/.local/bin/codex-slack-notify
+```
+
+Windows:
+
+```powershell
+go build -o $HOME\bin\codex-slack-notify.exe .\cmd\codex-slack-notify
 ```
 
 ### 4. Test it manually
@@ -97,16 +111,28 @@ chmod +x ~/.local/bin/codex-slack-notify
 ~/.local/bin/codex-slack-notify '{"type":"test","last-assistant-message":"Slack test from codex-slack-notify","cwd":"/tmp"}'
 ```
 
+Windows PowerShell:
+
+```powershell
+& "$HOME\bin\codex-slack-notify.exe" '{"type":"test","last-assistant-message":"Slack test from codex-slack-notify","cwd":"C:\\Temp"}'
+```
+
 You should see a message in your Slack channel. On your phone, set that channel
 to notify you for all new messages if you want reliable attention pings.
 
 ### 5. Configure Codex
 
-Edit your Codex config:
+Linux/macOS Codex config path:
 
 ```bash
 mkdir -p ~/.codex
 vi ~/.codex/config.toml
+```
+
+Windows Codex config path:
+
+```text
+C:\Users\YOURNAME\.codex\config.toml
 ```
 
 Add or adjust:
@@ -115,11 +141,19 @@ Add or adjust:
 notify = ["~/.local/bin/codex-slack-notify"]
 ```
 
+Windows example:
+
+```toml
+notify = ["C:\\Users\\YOURNAME\\bin\\codex-slack-notify.exe"]
+```
+
 What these settings do:
 
 - `notify = ["~/.local/bin/codex-slack-notify"]` is the external hook.
   Codex runs that command and passes it a JSON payload, which is what sends the
   Slack message.
+- `notify = ["C:\\Users\\YOURNAME\\bin\\codex-slack-notify.exe"]` does the
+  same thing on Windows without any PowerShell wrapper.
 
 ## Limitations
 

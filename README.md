@@ -41,4 +41,4 @@ make run
 make dry-run
 ```
 
-`make build` writes binaries to `./bin/pgdrivebackup` and `./bin/codex-slack-notify`.
+`make build` writes binaries to `./bin/pgdrivebackup`, `./bin/codex-slack-notify`, and `./bin/codex-slack-notify.exe`.
