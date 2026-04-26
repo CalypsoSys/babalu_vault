@@ -34,7 +34,7 @@ func main() {
 }
 
 func newConfiguredLogger(args []string) (*slog.Logger, interface{ Close() error }, error) {
-	configPath := filepath.Join("configs", "example.yaml")
+	configPath := defaultConfigPath()
 	for len(args) > 0 {
 		switch args[0] {
 		case "--config":
@@ -54,7 +54,7 @@ func newConfiguredLogger(args []string) (*slog.Logger, interface{ Close() error 
 }
 
 func run(logger *slog.Logger, args []string) error {
-	configPath := filepath.Join("configs", "example.yaml")
+	configPath := defaultConfigPath()
 	uiDryRun := false
 
 	for len(args) > 0 {
@@ -94,6 +94,10 @@ parsedGlobalFlags:
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+func defaultConfigPath() string {
+	return filepath.Join("..", "configs", "example.yaml")
 }
 
 func runUI(configPath string, dryRun bool) error {

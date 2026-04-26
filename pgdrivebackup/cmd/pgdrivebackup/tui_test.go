@@ -155,7 +155,7 @@ func TestBackupProgressMarksMatchingTargetRunning(t *testing.T) {
 
 func TestBackupFinishedSkipsDuplicateStartedActivity(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	m := newModel("configs/example.yaml", &config.Config{}, false, logger)
+	m := newModel("../configs/example.yaml", &config.Config{}, false, logger)
 	m.running = true
 	m.backupMsgs = make(chan tea.Msg, 1)
 

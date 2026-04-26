@@ -21,6 +21,9 @@ It supports:
 ## Repository layout
 
 ```text
+configs/
+  example.yaml
+  calypsosys.yaml
 pgdrivebackup/
   cmd/codex-slack-notify/main.go
   cmd/pgdrivebackup/main.go
@@ -29,7 +32,6 @@ pgdrivebackup/
   internal/retention/
   internal/logging/
   internal/slacknotify/
-  configs/example.yaml
 ```
 
 ## Prerequisites
@@ -42,7 +44,8 @@ pgdrivebackup/
 
 ## Example config
 
-See `configs/example.yaml`.
+See `../configs/example.yaml` from inside `pgdrivebackup/`, or `configs/example.yaml`
+from the repo root.
 
 Database passwords use the `password` field. For environment-backed secrets, write them as `${VARNAME}`:
 
@@ -99,7 +102,7 @@ With the default settings, each database keeps at most 6 managed backups:
 Launch the continuous terminal UI:
 
 ```bash
-go run ./cmd/pgdrivebackup --config configs/example.yaml
+go run ./cmd/pgdrivebackup --config ../configs/example.yaml
 ```
 
 The TUI keeps running and schedules one automatic backup per local calendar day at `backup.time_of_day`. On startup, it checks `backup.state_path` and runs immediately if it has not already run yet that day.
@@ -109,7 +112,7 @@ While the TUI is running, it also watches the YAML config file for changes and r
 Launch the TUI in dry-run mode:
 
 ```bash
-go run ./cmd/pgdrivebackup --config configs/example.yaml --dry-run
+go run ./cmd/pgdrivebackup --config ../configs/example.yaml --dry-run
 ```
 
 TUI controls:
@@ -125,31 +128,31 @@ One-shot commands are still available.
 List config:
 
 ```bash
-go run ./cmd/pgdrivebackup --config configs/example.yaml list
+go run ./cmd/pgdrivebackup --config ../configs/example.yaml list
 ```
 
 Back up everything:
 
 ```bash
-go run ./cmd/pgdrivebackup --config configs/example.yaml backup
+go run ./cmd/pgdrivebackup --config ../configs/example.yaml backup
 ```
 
 Back up a single server:
 
 ```bash
-go run ./cmd/pgdrivebackup --config configs/example.yaml backup --server localdev
+go run ./cmd/pgdrivebackup --config ../configs/example.yaml backup --server localdev
 ```
 
 Back up one database:
 
 ```bash
-go run ./cmd/pgdrivebackup --config configs/example.yaml backup --server localdev --database app1_dev
+go run ./cmd/pgdrivebackup --config ../configs/example.yaml backup --server localdev --database app1_dev
 ```
 
 Dry run:
 
 ```bash
-go run ./cmd/pgdrivebackup --config configs/example.yaml backup --dry-run
+go run ./cmd/pgdrivebackup --config ../configs/example.yaml backup --dry-run
 ```
 
 Version:
