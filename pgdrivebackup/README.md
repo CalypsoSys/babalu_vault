@@ -7,6 +7,7 @@ It supports:
 - Native PostgreSQL/TCP backups using local `pg_dump`
 - Docker PostgreSQL backups using `docker exec`
 - SSH-backed PostgreSQL backups for remote native or remote Docker `pg_dump`
+- Slack notifications for Codex turn-complete webhooks via `codex-slack-notify`
 - Gzipped plain SQL backups for easier cross-version restores
 - Multiple servers and multiple databases per server
 - Per-database retention overrides
@@ -21,11 +22,13 @@ It supports:
 
 ```text
 pgdrivebackup/
+  cmd/codex-slack-notify/main.go
   cmd/pgdrivebackup/main.go
   internal/config/
   internal/backup/
   internal/retention/
   internal/logging/
+  internal/slacknotify/
   configs/example.yaml
 ```
 
@@ -154,6 +157,160 @@ Version:
 ```bash
 go run ./cmd/pgdrivebackup version
 ```
+
+## Codex Slack notifier
+
+Build the notifier:
+
+```bash
+go build ./cmd/codex-slack-notify
+```
+
+Or from the repo root:
+
+```bash
+make build-slack-notify
+```
+
+The executable accepts the Codex JSON payload as its first argument, looks for
+`SLACK_CODEX_WEBHOOK_URL` in the current environment, and also loads
+`~/.config/secrets/env` when present to mirror shell startup behavior.
+
+If the webhook variable is missing, it exits successfully without sending
+anything. Invalid JSON payloads fall back to a generic `"Codex needs attention."`
+Slack message.
+
+## Codex Slack alerts setup
+
+This notifier is meant for "Codex finished" or "Codex needs attention" phone
+alerts. It does not make Slack a two-way Codex control surface. The practical
+workflow is:
+
+```text
+Codex in tmux -> codex-slack-notify -> Slack channel -> phone alert -> SSH back in -> tmux attach
+```
+
+### 1. Store the Slack webhook secret
+
+Keep the webhook URL out of the repo and load it from a private env file:
+
+```bash
+mkdir -p ~/.config/secrets
+chmod 700 ~/.config/secrets
+vi ~/.config/secrets/env
+```
+
+Put this in that file:
+
+```bash
+export SLACK_CODEX_WEBHOOK_URL='https://hooks.slack.com/services/XXX/YYY/ZZZ'
+```
+
+Lock it down:
+
+```bash
+chmod 600 ~/.config/secrets/env
+```
+
+Security note: treat the webhook URL like a password. Do not paste it into
+GitHub, tickets, screenshots, prompts, or tracked config files.
+
+### 2. Optionally load the secret in your shell
+
+`codex-slack-notify` already reads `~/.config/secrets/env` directly, so this is
+mostly for manual testing and convenience:
+
+```bash
+vi ~/.profile
+```
+
+Add:
+
+```bash
+# Load private environment secrets
+if [ -f "$HOME/.config/secrets/env" ]; then
+  . "$HOME/.config/secrets/env"
+fi
+```
+
+Reload it:
+
+```bash
+source ~/.profile
+echo "$SLACK_CODEX_WEBHOOK_URL"
+```
+
+### 3. Install the notifier somewhere stable
+
+For a user-local install path:
+
+```bash
+mkdir -p ~/.local/bin
+cd /path/to/pgdrivebackup
+go build -o ~/.local/bin/codex-slack-notify ./cmd/codex-slack-notify
+chmod +x ~/.local/bin/codex-slack-notify
+```
+
+You can also keep using a repo-local build during development, but a stable path
+is easier for Codex config.
+
+### 4. Test the notifier manually
+
+```bash
+~/.local/bin/codex-slack-notify '{"type":"test","last-assistant-message":"Slack test from codex-slack-notify","cwd":"/tmp"}'
+```
+
+You should see a message in your Slack channel. On your phone, set that channel
+to notify you for all new messages if you want reliable attention pings.
+
+### 5. Configure Codex to call the notifier
+
+Edit your Codex config:
+
+```bash
+mkdir -p ~/.codex
+vi ~/.codex/config.toml
+```
+
+Add or adjust:
+
+```toml
+notify = ["/home/joe/.local/bin/codex-slack-notify"]
+
+[tui]
+notifications = ["agent-turn-complete", "approval-requested"]
+notification_method = "auto"
+```
+
+If your username is not `joe`, update the path accordingly.
+
+### 6. Run Codex inside tmux
+
+This is the recommended companion setup because Slack alerts are best used as
+"come back and check Codex" notifications:
+
+```bash
+sudo apt install tmux
+tmux new -s codex
+codex
+```
+
+Detach before walking away with `Ctrl+b`, then `d`. When Slack pings your phone,
+SSH back in and reattach:
+
+```bash
+tmux attach -t codex
+```
+
+### Limitations
+
+- Incoming Slack webhooks are one-way. You cannot reply in Slack and have Codex
+  continue from that reply by webhook alone.
+- For true Slack interaction you would need a real Slack bot, interactivity or
+  slash commands, request signature verification, and a safe bridge back to the
+  machine running Codex.
+- The simplest and safest pattern is still: Slack alert, SSH back in, reattach
+  `tmux`, continue in the terminal.
 
 ## Backup methods
 
