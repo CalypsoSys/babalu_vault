@@ -39,6 +39,26 @@ make build
 make test
 make run
 make dry-run
+make gitleaks
 ```
 
 `make build` writes binaries to `./bin/pgdrivebackup`, `./bin/codex-slack-notify`, and `./bin/codex-slack-notify.exe`.
+
+## Secret Scanning
+
+This repo includes a baseline `gitleaks` setup:
+
+- Local scan: `make gitleaks`
+- Config: [`.gitleaks.toml`](/home/joe/code/calypso_pgvault/.gitleaks.toml)
+- Pre-commit hook: [`.pre-commit-config.yaml`](/home/joe/code/calypso_pgvault/.pre-commit-config.yaml)
+- CI workflow: [`.github/workflows/gitleaks.yml`](/home/joe/code/calypso_pgvault/.github/workflows/gitleaks.yml)
+
+The local target expects the `gitleaks` CLI to already be installed and scans git history with redacted output.
+
+To enable the pre-commit hook locally:
+
+```bash
+pre-commit install
+```
+
+The hook uses the official `gitleaks` pre-commit integration and runs on staged changes before each commit.

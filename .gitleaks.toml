@@ -1,0 +1,4 @@
+title = "calypso_pgvault gitleaks config"
+
+[extend]
+useDefault = true

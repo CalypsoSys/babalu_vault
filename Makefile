@@ -7,7 +7,7 @@ SLACK_NOTIFY_WINDOWS_PATH := $(BIN_DIR)/$(SLACK_NOTIFY_NAME).exe
 CACHE_DIR := .cache
 GO_ENV := GOCACHE=$(abspath $(CACHE_DIR)/go-build) GOMODCACHE=$(abspath $(CACHE_DIR)/go-mod)
 
-.PHONY: build build-pgdrivebackup build-slack-notify build-slack-notify-windows test run dry-run clean
+.PHONY: build build-pgdrivebackup build-slack-notify build-slack-notify-windows test run dry-run gitleaks clean
 
 build: build-pgdrivebackup build-slack-notify build-slack-notify-windows
 
@@ -37,6 +37,9 @@ run:
 dry-run:
 	mkdir -p $(CACHE_DIR)/go-build $(CACHE_DIR)/go-mod
 	$(GO_ENV) go run ./cmd/$(APP_NAME) --config configs/example.yaml --dry-run
+
+gitleaks:
+	gitleaks git --config .gitleaks.toml --redact .
 
 clean:
 	rm -rf $(BIN_DIR) $(CACHE_DIR)
