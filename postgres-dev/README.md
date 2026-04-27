@@ -13,7 +13,7 @@ Shared local PostgreSQL for development on a Windows machine that also uses WSL 
 
 For PostgreSQL 18 and later, the official Docker image expects the named volume to be mounted at `/var/lib/postgresql`, not `/var/lib/postgresql/data`.
 
-Default connection settings:
+Default connection settings when you use the example shell values below:
 
 ```text
 Host: localhost
@@ -25,15 +25,23 @@ Database: postgres
 
 ## Quick start
 
-1. Copy `.env.example` to `.env`.
-2. Adjust values if needed.
-3. Start PostgreSQL:
+1. Export the environment variables in your shell:
+
+```bash
+export POSTGRES_USER=postgres
+export POSTGRES_PASSWORD=local-dev-password
+export POSTGRES_DB=postgres
+export POSTGRES_PORT=5432
+export POSTGRES_LOG_DIR=/srv/logs/postgres
+```
+
+2. Start PostgreSQL:
 
 ```bash
 docker compose up -d
 ```
 
-4. Check readiness:
+3. Check readiness:
 
 ```bash
 docker compose ps
@@ -42,7 +50,7 @@ docker compose logs -f postgres
 
 PostgreSQL also writes logs to the host directory configured by `POSTGRES_LOG_DIR`.
 
-5. Connect from Windows, WSL, or local tools:
+4. Connect from Windows, WSL, or local tools:
 
 ```bash
 psql "host=localhost port=5432 user=postgres password=local-dev-password dbname=postgres"
@@ -74,6 +82,16 @@ Stop and remove the named volume:
 docker compose down -v
 ```
 
+## Environment variables
+
+- `POSTGRES_PASSWORD` is required in the shell environment before `docker compose up`.
+- `POSTGRES_USER` defaults to `postgres`.
+- `POSTGRES_DB` defaults to `postgres`.
+- `POSTGRES_PORT` defaults to `5432`.
+- `POSTGRES_LOG_DIR` defaults to `/srv/logs/postgres`.
+
+If you change `POSTGRES_PASSWORD` after the database volume has already been initialized, PostgreSQL will keep using the old password stored in the existing data directory. Recreate the volume with `docker compose down -v` if you want the new password to take effect for this local dev instance.
+
 ## Log files
 
 - PostgreSQL writes to `${POSTGRES_LOG_DIR}/postgresql.log` via a host bind mount.
@@ -102,6 +120,4 @@ The sample config sends `USR1` to the container after rotation so PostgreSQL reo
 
 ## Security notes
 
-- `.env.example` is safe to commit.
-- Do not commit a real `.env` with non-development credentials.
 - This setup intentionally uses a Docker named volume instead of a Windows bind mount to avoid filesystem permission and performance issues common with Windows-hosted database files.

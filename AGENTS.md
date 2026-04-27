@@ -5,7 +5,7 @@
 This repository has two working areas:
 
 - repo-root Go module: backup and notifier executables live under `cmd/`, with supporting packages under `internal/`.
-- `postgres-dev/`: local PostgreSQL 18 Docker Compose environment for development. Use `docker-compose.yml` and `postgres-dev/.env.example` as the baseline.
+- `postgres-dev/`: local PostgreSQL 18 Docker Compose environment for development. Use `docker-compose.yml` as the baseline.
 
 Keep new Go code inside `internal/...` unless it is part of the CLI surface. Keep sample or local-only config under the repo-root `configs/` directory.
 
