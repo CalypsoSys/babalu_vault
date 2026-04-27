@@ -135,6 +135,82 @@ func TestRunOneEmitsRunningProgress(t *testing.T) {
 	}
 }
 
+func TestResolveTargetsDiscoversDatabasesAndAppliesIgnoreList(t *testing.T) {
+	original := listDatabasesFn
+	listDatabasesFn = func(ctx context.Context, server config.ServerConfig) ([]string, error) {
+		return []string{"template1", "app2", "postgres", "app1"}, nil
+	}
+	defer func() {
+		listDatabasesFn = original
+	}()
+
+	cfg := &config.Config{
+		Retention: config.RetentionPolicy{DailyKeep: 14, WeeklyKeep: 8, MonthlyKeep: 12},
+		Servers: []config.ServerConfig{
+			{
+				Name:              "localdev",
+				Type:              "tcp",
+				Host:              "localhost",
+				Port:              5432,
+				Username:          "postgres",
+				Password:          "${LOCALDEV_POSTGRES_PASSWORD}",
+				DiscoverDatabases: true,
+				IgnoreDatabases:   []string{"app2"},
+				Databases: []config.DatabaseConfig{
+					{Name: "app1", Retention: &config.RetentionPolicy{DailyKeep: 30, WeeklyKeep: 12, MonthlyKeep: 24}},
+				},
+			},
+		},
+	}
+
+	selected, err := ResolveTargets(context.Background(), cfg, "", "")
+	if err != nil {
+		t.Fatalf("ResolveTargets() error = %v", err)
+	}
+	if len(selected) != 1 {
+		t.Fatalf("expected 1 selected database, got %d", len(selected))
+	}
+	if selected[0].Database.Name != "app1" {
+		t.Fatalf("expected app1, got %q", selected[0].Database.Name)
+	}
+	if selected[0].Retention.DailyKeep != 14 || selected[0].Retention.MonthlyKeep != 12 {
+		t.Fatalf("expected global retention for discovered database, got %+v", selected[0].Retention)
+	}
+}
+
+func TestResolveTargetsSupportsDiscoveredDatabaseFilter(t *testing.T) {
+	original := listDatabasesFn
+	listDatabasesFn = func(ctx context.Context, server config.ServerConfig) ([]string, error) {
+		return []string{"app1", "app2"}, nil
+	}
+	defer func() {
+		listDatabasesFn = original
+	}()
+
+	cfg := &config.Config{
+		Retention: config.RetentionPolicy{DailyKeep: 14, WeeklyKeep: 8, MonthlyKeep: 12},
+		Servers: []config.ServerConfig{
+			{
+				Name:              "localdev",
+				Type:              "tcp",
+				Host:              "localhost",
+				Port:              5432,
+				Username:          "postgres",
+				Password:          "${LOCALDEV_POSTGRES_PASSWORD}",
+				DiscoverDatabases: true,
+			},
+		},
+	}
+
+	selected, err := ResolveTargets(context.Background(), cfg, "localdev", "app2")
+	if err != nil {
+		t.Fatalf("ResolveTargets() error = %v", err)
+	}
+	if len(selected) != 1 || selected[0].Database.Name != "app2" {
+		t.Fatalf("expected only app2, got %+v", selected)
+	}
+}
+
 func containsAny(value string, needles []string) bool {
 	for _, needle := range needles {
 		if needle != "" && strings.Contains(value, needle) {

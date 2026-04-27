@@ -28,13 +28,14 @@ servers:
     container: "dev-postgres"
     username: "postgres"
     password: "${LOCALDEV_POSTGRES_PASSWORD}"
+    discover_databases: true
+    ignore_databases:
+      - "postgres"
+      - "template0"
+      - "template1"
     databases:
       - name: "app1_dev"
       - name: "app2_dev"
-        retention:
-          daily_keep: 4
-          weekly_keep: 1
-          monthly_keep: 1
 
   - name: "sshdocker"
     type: "ssh"

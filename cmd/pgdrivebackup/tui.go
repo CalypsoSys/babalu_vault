@@ -427,6 +427,18 @@ func (m *model) updateStatus(row backup.SummaryRow, at time.Time) {
 			return
 		}
 	}
+	m.statuses = append(m.statuses, databaseStatus{
+		Server:      row.Server,
+		Database:    row.Database,
+		Method:      row.Method,
+		Retention:   row.Retention,
+		LastStatus:  row.Status,
+		LastRun:     at,
+		LastSize:    row.SizeBytes,
+		LastError:   row.Error,
+		LastPaths:   row.StoredPaths,
+		LastElapsed: row.Duration,
+	})
 }
 
 func (m *model) markStatusRunning(row backup.SummaryRow) {
@@ -437,6 +449,13 @@ func (m *model) markStatusRunning(row backup.SummaryRow) {
 			return
 		}
 	}
+	m.statuses = append(m.statuses, databaseStatus{
+		Server:     row.Server,
+		Database:   row.Database,
+		Method:     row.Method,
+		Retention:  row.Retention,
+		LastStatus: "running",
+	})
 }
 
 func (m *model) recordEvent(level, message string) {

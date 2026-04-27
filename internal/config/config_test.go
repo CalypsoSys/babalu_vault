@@ -56,7 +56,7 @@ servers:
 	}
 }
 
-func TestFilterAndRetentionOverride(t *testing.T) {
+func TestFilterUsesGlobalRetention(t *testing.T) {
 	cfg := &Config{
 		Retention: RetentionPolicy{DailyKeep: 14, WeeklyKeep: 8, MonthlyKeep: 12},
 		Servers: []ServerConfig{
@@ -79,8 +79,8 @@ func TestFilterAndRetentionOverride(t *testing.T) {
 	if len(selected) != 1 {
 		t.Fatalf("expected 1 database, got %d", len(selected))
 	}
-	if selected[0].Retention.DailyKeep != 30 || selected[0].Retention.MonthlyKeep != 24 {
-		t.Fatalf("unexpected retention override: %+v", selected[0].Retention)
+	if selected[0].Retention.DailyKeep != 14 || selected[0].Retention.MonthlyKeep != 12 {
+		t.Fatalf("expected global retention, got %+v", selected[0].Retention)
 	}
 }
 
@@ -130,6 +130,29 @@ func TestValidateAllowsSSHRemoteDocker(t *testing.T) {
 
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("expected ssh docker config to validate, got %v", err)
+	}
+}
+
+func TestValidateAllowsDiscoverDatabasesWithoutStaticList(t *testing.T) {
+	cfg := &Config{
+		Backup:    BackupConfig{RootDir: "/tmp/backups", TimeOfDay: "02:00", GzipLevel: 6},
+		Retention: RetentionPolicy{DailyKeep: 4, WeeklyKeep: 1, MonthlyKeep: 1},
+		Servers: []ServerConfig{
+			{
+				Name:              "localdev",
+				Type:              "tcp",
+				Host:              "localhost",
+				Port:              5432,
+				Username:          "postgres",
+				Password:          "${LOCALDEV_POSTGRES_PASSWORD}",
+				DiscoverDatabases: true,
+				IgnoreDatabases:   []string{"postgres", "template0", "template1"},
+			},
+		},
+	}
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected discover_databases config to validate, got %v", err)
 	}
 }
 

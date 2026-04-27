@@ -56,8 +56,8 @@ func TestReconcileStatusesPreservesExistingResults(t *testing.T) {
 	if got[1].Database != "audit" || got[1].LastStatus != "pending" {
 		t.Fatalf("expected new database to start pending, got %+v", got[1])
 	}
-	if got[1].Retention.DailyKeep != 30 || got[1].Retention.MonthlyKeep != 6 {
-		t.Fatalf("expected updated retention override, got %+v", got[1].Retention)
+	if got[1].Retention.DailyKeep != 14 || got[1].Retention.MonthlyKeep != 12 {
+		t.Fatalf("expected global retention, got %+v", got[1].Retention)
 	}
 }
 

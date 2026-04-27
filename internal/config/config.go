@@ -35,17 +35,19 @@ type RetentionPolicy struct {
 }
 
 type ServerConfig struct {
-	Name          string           `yaml:"name"`
-	Type          string           `yaml:"type"`
-	Host          string           `yaml:"host"`
-	Port          int              `yaml:"port"`
-	Username      string           `yaml:"username"`
-	Password      string           `yaml:"password"`
-	Container     string           `yaml:"container"`
-	SSHTarget     string           `yaml:"ssh_target"`
-	SSHPort       int              `yaml:"ssh_port"`
-	SSHRemoteType string           `yaml:"ssh_remote_type"`
-	Databases     []DatabaseConfig `yaml:"databases"`
+	Name              string           `yaml:"name"`
+	Type              string           `yaml:"type"`
+	Host              string           `yaml:"host"`
+	Port              int              `yaml:"port"`
+	Username          string           `yaml:"username"`
+	Password          string           `yaml:"password"`
+	Container         string           `yaml:"container"`
+	SSHTarget         string           `yaml:"ssh_target"`
+	SSHPort           int              `yaml:"ssh_port"`
+	SSHRemoteType     string           `yaml:"ssh_remote_type"`
+	DiscoverDatabases bool             `yaml:"discover_databases"`
+	IgnoreDatabases   []string         `yaml:"ignore_databases"`
+	Databases         []DatabaseConfig `yaml:"databases"`
 }
 
 type DatabaseConfig struct {
@@ -138,8 +140,8 @@ func (c *Config) Validate() error {
 		if _, _, err := ResolveConfiguredSecret(server.Password); err != nil {
 			return fmt.Errorf("server %q password: %w", server.Name, err)
 		}
-		if len(server.Databases) == 0 {
-			return fmt.Errorf("server %q must have at least one database", server.Name)
+		if !server.DiscoverDatabases && len(server.Databases) == 0 {
+			return fmt.Errorf("server %q must have at least one database or discover_databases enabled", server.Name)
 		}
 		switch server.Type {
 		case "tcp":
@@ -185,6 +187,11 @@ func (c *Config) Validate() error {
 				}
 			}
 		}
+		for _, name := range server.IgnoreDatabases {
+			if strings.TrimSpace(name) == "" {
+				return fmt.Errorf("server %q ignore_databases entries must be non-empty", server.Name)
+			}
+		}
 	}
 	return validateRetention(c.Retention, "retention")
 }
@@ -228,20 +235,7 @@ func (c *Config) Filter(serverName, databaseName string) []SelectedDatabase {
 }
 
 func (c *Config) RetentionFor(database DatabaseConfig) RetentionPolicy {
-	if database.Retention == nil {
-		return c.Retention
-	}
-	r := c.Retention
-	if database.Retention.DailyKeep != 0 {
-		r.DailyKeep = database.Retention.DailyKeep
-	}
-	if database.Retention.WeeklyKeep != 0 {
-		r.WeeklyKeep = database.Retention.WeeklyKeep
-	}
-	if database.Retention.MonthlyKeep != 0 {
-		r.MonthlyKeep = database.Retention.MonthlyKeep
-	}
-	return r
+	return c.Retention
 }
 
 func ResolveConfiguredSecret(value string) (resolved string, placeholder string, err error) {
@@ -264,4 +258,13 @@ type SelectedDatabase struct {
 	Server    ServerConfig
 	Database  DatabaseConfig
 	Retention RetentionPolicy
+}
+
+func (s ServerConfig) DatabaseConfigFor(name string) (DatabaseConfig, bool) {
+	for _, db := range s.Databases {
+		if db.Name == name {
+			return db, true
+		}
+	}
+	return DatabaseConfig{}, false
 }

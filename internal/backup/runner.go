@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -31,6 +32,7 @@ type SummaryRow struct {
 	Server      string
 	Database    string
 	Method      string
+	Retention   config.RetentionPolicy
 	Status      string
 	LocalFile   string
 	StoredPaths []string
@@ -54,8 +56,14 @@ var sensitivePatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)(secret=)([^\s'"]+)`),
 }
 
+var defaultIgnoredDatabases = []string{"postgres", "template0", "template1"}
+var listDatabasesFn = listServerDatabases
+
 func (r *Runner) Run(ctx context.Context, serverFilter, databaseFilter string, dryRun bool) ([]SummaryRow, error) {
-	selected := r.Config.Filter(serverFilter, databaseFilter)
+	selected, err := ResolveTargets(ctx, r.Config, serverFilter, databaseFilter)
+	if err != nil {
+		return nil, err
+	}
 	if len(selected) == 0 {
 		return nil, fmt.Errorf("no databases matched server=%q database=%q", serverFilter, databaseFilter)
 	}
@@ -86,10 +94,11 @@ func (r *Runner) runOne(ctx context.Context, item config.SelectedDatabase, dryRu
 	start := time.Now().UTC()
 	method := item.Server.Type
 	row := SummaryRow{
-		Server:   item.Server.Name,
-		Database: item.Database.Name,
-		Method:   method,
-		Status:   "ok",
+		Server:    item.Server.Name,
+		Database:  item.Database.Name,
+		Method:    method,
+		Retention: item.Retention,
+		Status:    "ok",
 	}
 
 	logger := r.Logger.With(
@@ -124,6 +133,7 @@ func (r *Runner) runOne(ctx context.Context, item config.SelectedDatabase, dryRu
 		Server:      row.Server,
 		Database:    row.Database,
 		Method:      row.Method,
+		Retention:   row.Retention,
 		Status:      "running",
 		LocalFile:   row.LocalFile,
 		StoredPaths: append([]string(nil), row.StoredPaths...),
@@ -201,6 +211,105 @@ func (r *Runner) emitProgress(row SummaryRow) {
 		return
 	}
 	r.Progress(row)
+}
+
+func ResolveTargets(ctx context.Context, cfg *config.Config, serverFilter, databaseFilter string) ([]config.SelectedDatabase, error) {
+	var selected []config.SelectedDatabase
+	for _, server := range cfg.Servers {
+		if serverFilter != "" && server.Name != serverFilter {
+			continue
+		}
+		if !server.DiscoverDatabases {
+			for _, database := range server.Databases {
+				if databaseFilter != "" && database.Name != databaseFilter {
+					continue
+				}
+				selected = append(selected, config.SelectedDatabase{
+					Server:    server,
+					Database:  database,
+					Retention: cfg.RetentionFor(database),
+				})
+			}
+			continue
+		}
+
+		names, err := listDatabasesFn(ctx, server)
+		if err != nil {
+			return nil, fmt.Errorf("discover databases for server %q: %w", server.Name, err)
+		}
+		ignored := ignoredDatabaseSet(server)
+		for _, name := range names {
+			if _, skip := ignored[name]; skip {
+				continue
+			}
+			if databaseFilter != "" && databaseFilter != name {
+				continue
+			}
+			database := config.DatabaseConfig{Name: name}
+			if explicit, ok := server.DatabaseConfigFor(name); ok {
+				database = explicit
+			}
+			selected = append(selected, config.SelectedDatabase{
+				Server:    server,
+				Database:  database,
+				Retention: cfg.RetentionFor(database),
+			})
+		}
+	}
+	return selected, nil
+}
+
+func ignoredDatabaseSet(server config.ServerConfig) map[string]struct{} {
+	ignored := make(map[string]struct{}, len(defaultIgnoredDatabases)+len(server.IgnoreDatabases))
+	for _, name := range defaultIgnoredDatabases {
+		ignored[name] = struct{}{}
+	}
+	for _, name := range server.IgnoreDatabases {
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			continue
+		}
+		ignored[trimmed] = struct{}{}
+	}
+	return ignored
+}
+
+func listServerDatabases(ctx context.Context, server config.ServerConfig) ([]string, error) {
+	cmd, stdout, stderrBuf, err := buildListDatabasesCommand(ctx, server)
+	if err != nil {
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, wrapCommandStartError(server.Type, err)
+	}
+	out, readErr := io.ReadAll(stdout)
+	waitErr := cmd.Wait()
+	if readErr != nil {
+		return nil, fmt.Errorf("read database list output: %w", readErr)
+	}
+	if waitErr != nil {
+		msg := strings.TrimSpace(stderrBuf.String())
+		if msg == "" {
+			msg = waitErr.Error()
+		}
+		return nil, fmt.Errorf("database list failed: %s", msg)
+	}
+
+	seen := make(map[string]struct{})
+	var names []string
+	for _, line := range strings.Split(string(out), "\n") {
+		name := strings.TrimSpace(line)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
 func (r *Runner) createBackupFile(ctx context.Context, item config.SelectedDatabase, localPath, preview string, logOperation func(string, string, ...slog.Attr)) error {
@@ -323,6 +432,85 @@ func buildDumpCommand(ctx context.Context, item config.SelectedDatabase) (*exec.
 	}
 }
 
+func buildListDatabasesCommand(ctx context.Context, server config.ServerConfig) (*exec.Cmd, io.ReadCloser, *bytes.Buffer, error) {
+	password, _, err := config.ResolveConfiguredSecret(server.Password)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("resolve password: %w", err)
+	}
+	var stderr bytes.Buffer
+	sql := "SELECT datname FROM pg_database ORDER BY datname"
+	switch server.Type {
+	case "tcp":
+		if _, err := exec.LookPath("psql"); err != nil {
+			return nil, nil, nil, fmt.Errorf("psql not found in PATH: %w", err)
+		}
+		args := []string{
+			"-X",
+			"-A",
+			"-t",
+			"-q",
+			"-P", "pager=off",
+			"--no-password",
+			"--host", server.Host,
+			"--port", fmt.Sprintf("%d", server.Port),
+			"--username", server.Username,
+			"--dbname", "postgres",
+			"-c", sql,
+		}
+		cmd := exec.CommandContext(ctx, "psql", args...)
+		cmd.Env = append(os.Environ(), "PGPASSWORD="+password)
+		cmd.Stderr = &stderr
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("pipe psql stdout: %w", err)
+		}
+		return cmd, stdout, &stderr, nil
+	case "docker":
+		if _, err := exec.LookPath("docker"); err != nil {
+			return nil, nil, nil, fmt.Errorf("docker not found in PATH: %w", err)
+		}
+		args := []string{
+			"exec",
+			"-e", "PGPASSWORD=" + password,
+			server.Container,
+			"psql",
+			"-X",
+			"-A",
+			"-t",
+			"-q",
+			"-P", "pager=off",
+			"--no-password",
+			"--username", server.Username,
+			"--dbname", "postgres",
+			"-c", sql,
+		}
+		cmd := exec.CommandContext(ctx, "docker", args...)
+		cmd.Stderr = &stderr
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("pipe docker stdout: %w", err)
+		}
+		return cmd, stdout, &stderr, nil
+	case "ssh":
+		if _, err := exec.LookPath("ssh"); err != nil {
+			return nil, nil, nil, fmt.Errorf("ssh not found in PATH: %w", err)
+		}
+		remoteCommand, err := buildSSHListDatabasesCommand(server, password)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		cmd := exec.CommandContext(ctx, "ssh", buildServerSSHArgs(server, remoteCommand)...)
+		cmd.Stderr = &stderr
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("pipe ssh stdout: %w", err)
+		}
+		return cmd, stdout, &stderr, nil
+	default:
+		return nil, nil, nil, fmt.Errorf("unsupported server type %q", server.Type)
+	}
+}
+
 func buildSSHRemoteCommand(item config.SelectedDatabase, password string) (string, error) {
 	switch item.Server.SSHRemoteType {
 	case "", "tcp":
@@ -359,15 +547,62 @@ func buildSSHRemoteCommand(item config.SelectedDatabase, password string) (strin
 	}
 }
 
+func buildSSHListDatabasesCommand(server config.ServerConfig, password string) (string, error) {
+	sql := "SELECT datname FROM pg_database ORDER BY datname"
+	switch server.SSHRemoteType {
+	case "", "tcp":
+		args := []string{
+			"PGPASSWORD=" + shellQuote(password),
+			"psql",
+			"-X",
+			"-A",
+			"-t",
+			"-q",
+			"-P", shellQuote("pager=off"),
+			"--no-password",
+			"--host", shellQuote(server.Host),
+			"--port", shellQuote(fmt.Sprintf("%d", server.Port)),
+			"--username", shellQuote(server.Username),
+			"--dbname", shellQuote("postgres"),
+			"-c", shellQuote(sql),
+		}
+		return strings.Join(args, " "), nil
+	case "docker":
+		args := []string{
+			"docker",
+			"exec",
+			"-e", shellQuote("PGPASSWORD=" + password),
+			shellQuote(server.Container),
+			"psql",
+			"-X",
+			"-A",
+			"-t",
+			"-q",
+			"-P", shellQuote("pager=off"),
+			"--no-password",
+			"--username", shellQuote(server.Username),
+			"--dbname", shellQuote("postgres"),
+			"-c", shellQuote(sql),
+		}
+		return strings.Join(args, " "), nil
+	default:
+		return "", fmt.Errorf("unsupported ssh_remote_type %q", server.SSHRemoteType)
+	}
+}
+
 func buildSSHArgs(item config.SelectedDatabase, remoteCommand string) []string {
+	return buildServerSSHArgs(item.Server, remoteCommand)
+}
+
+func buildServerSSHArgs(server config.ServerConfig, remoteCommand string) []string {
 	args := []string{
 		"-o", "BatchMode=yes",
 		"-o", "StrictHostKeyChecking=yes",
 	}
-	if item.Server.SSHPort > 0 {
-		args = append(args, "-p", fmt.Sprintf("%d", item.Server.SSHPort))
+	if server.SSHPort > 0 {
+		args = append(args, "-p", fmt.Sprintf("%d", server.SSHPort))
 	}
-	args = append(args, item.Server.SSHTarget, remoteCommand)
+	args = append(args, server.SSHTarget, remoteCommand)
 	return args
 }
 

@@ -9,7 +9,8 @@ It supports:
 - SSH-backed PostgreSQL backups for remote native or remote Docker `pg_dump`
 - Gzipped plain SQL backups for easier cross-version restores
 - Multiple servers and multiple databases per server
-- Per-database retention overrides
+- Optional database discovery per server using `pg_database`
+- Global retention policy
 - Gzip compression
 - Continuous TUI mode built with Bubble Tea and Lip Gloss
 - Local filesystem storage under a configured backup root
@@ -119,7 +120,7 @@ TUI controls:
 
 One-shot commands are still available.
 
-List config:
+List backup targets:
 
 ```bash
 go run ./cmd/pgdrivebackup --config configs/example.yaml list
@@ -154,6 +155,29 @@ Version:
 ```bash
 go run ./cmd/pgdrivebackup version
 ```
+
+## Database discovery mode
+
+If a server should back up every database it can see, enable discovery on that server:
+
+```yaml
+- name: "dockerdev"
+  type: "docker"
+  container: "dev-postgres"
+  username: "postgres"
+  password: "${LOCALDEV_POSTGRES_PASSWORD}"
+  discover_databases: true
+  ignore_databases:
+    - "postgres"
+    - "template0"
+    - "template1"
+```
+
+When `discover_databases: true` is enabled:
+
+- `backup` queries `pg_database` at runtime and backs up every discovered database except ignored names
+- `list` queries the live server and prints the current discovered targets
+- entries under `databases:` become optional and can be used to document expected databases
 
 ## Backup methods
 

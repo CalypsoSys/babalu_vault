@@ -120,13 +120,15 @@ func runList(configPath string) error {
 	if err != nil {
 		return err
 	}
+	targets, err := backup.ResolveTargets(context.Background(), cfg, "", "")
+	if err != nil {
+		return err
+	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "SERVER\tTYPE\tDATABASE\tRETENTION")
-	for _, server := range cfg.Servers {
-		for _, database := range server.Databases {
-			r := cfg.RetentionFor(database)
-			fmt.Fprintf(w, "%s\t%s\t%s\tdaily=%d weekly=%d monthly=%d\n", server.Name, server.Type, database.Name, r.DailyKeep, r.WeeklyKeep, r.MonthlyKeep)
-		}
+	for _, item := range targets {
+		r := item.Retention
+		fmt.Fprintf(w, "%s\t%s\t%s\tdaily=%d weekly=%d monthly=%d\n", item.Server.Name, item.Server.Type, item.Database.Name, r.DailyKeep, r.WeeklyKeep, r.MonthlyKeep)
 	}
 	return w.Flush()
 }
@@ -181,7 +183,7 @@ func printRootUsage() {
 	fmt.Fprintf(os.Stdout, "  pgdrivebackup [--config PATH] [command] [flags]\n\n")
 	fmt.Fprintf(os.Stdout, "Commands:\n")
 	fmt.Fprintf(os.Stdout, "  ui         Launch the continuous terminal UI (default)\n")
-	fmt.Fprintf(os.Stdout, "  list       List configured servers and databases\n")
+	fmt.Fprintf(os.Stdout, "  list       List backup targets, including live-discovered databases\n")
 	fmt.Fprintf(os.Stdout, "  backup     Back up configured databases to local storage\n")
 	fmt.Fprintf(os.Stdout, "  version    Print version\n")
 	fmt.Fprintf(os.Stdout, "\nGlobal flags:\n")
