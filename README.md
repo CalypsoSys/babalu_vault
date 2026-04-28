@@ -62,3 +62,7 @@ pre-commit install
 ```
 
 The hook uses the official `gitleaks` pre-commit integration and runs on staged changes before each commit.
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE](/home/joe/code/calypso_pgvault/LICENSE).
