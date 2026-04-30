@@ -120,7 +120,7 @@ func TestPlannerCreatesMonthlySnapshotForPreviousMonth(t *testing.T) {
 	}
 }
 
-func TestPlannerBootstrapsWeeklySnapshotWhenTierEmpty(t *testing.T) {
+func TestPlannerDoesNotCreateWeeklySnapshotUntilPreviousWeekExists(t *testing.T) {
 	root := t.TempDir()
 	baseDir := filepath.Join(root, "local", "db")
 	if err := os.MkdirAll(baseDir, 0o755); err != nil {
@@ -144,12 +144,12 @@ func TestPlannerBootstrapsWeeklySnapshotWhenTierEmpty(t *testing.T) {
 		t.Fatalf("ApplyAt() error = %v", err)
 	}
 
-	if _, err := os.Stat(filepath.Join(baseDir, "weekly_local_db_2026-04-23.gz")); err != nil {
-		t.Fatalf("expected weekly bootstrap snapshot from oldest daily, stat error = %v", err)
+	if _, err := os.Stat(filepath.Join(baseDir, "weekly_local_db_2026-04-23.gz")); !os.IsNotExist(err) {
+		t.Fatalf("expected no weekly snapshot before a prior week exists, stat error = %v", err)
 	}
 }
 
-func TestPlannerBootstrapsMonthlySnapshotWhenTierEmpty(t *testing.T) {
+func TestPlannerDoesNotCreateMonthlySnapshotUntilPreviousMonthExists(t *testing.T) {
 	root := t.TempDir()
 	baseDir := filepath.Join(root, "local", "db")
 	if err := os.MkdirAll(baseDir, 0o755); err != nil {
@@ -173,7 +173,7 @@ func TestPlannerBootstrapsMonthlySnapshotWhenTierEmpty(t *testing.T) {
 		t.Fatalf("ApplyAt() error = %v", err)
 	}
 
-	if _, err := os.Stat(filepath.Join(baseDir, "monthly_local_db_2026-04-23.gz")); err != nil {
-		t.Fatalf("expected monthly bootstrap snapshot from oldest daily, stat error = %v", err)
+	if _, err := os.Stat(filepath.Join(baseDir, "monthly_local_db_2026-04-23.gz")); !os.IsNotExist(err) {
+		t.Fatalf("expected no monthly snapshot before a prior month exists, stat error = %v", err)
 	}
 }

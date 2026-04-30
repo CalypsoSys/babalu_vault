@@ -274,7 +274,8 @@ After that, the same backup cycle automatically manages snapshot tiers:
 
 - when a new ISO week begins, the newest daily backup from a prior week is copied into a `weekly_...gz` snapshot if that week does not already have one
 - when a new calendar month begins, the newest daily backup from a prior month is copied into a `monthly_...gz` snapshot if that month does not already have one
-- if a weekly or monthly tier is empty, the next backup run bootstraps that tier from the oldest available daily backup so snapshot history starts immediately
+- weekly snapshots are only created from backups in a completed prior ISO week
+- monthly snapshots are only created from backups in a completed prior calendar month
 - only 1 weekly and 1 monthly snapshot are kept with the default policy
 
 Cleanup is intentionally conservative:

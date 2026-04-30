@@ -118,15 +118,9 @@ func (p *Planner) ApplyAt(serverName, databaseName string, policy config.Retenti
 		if err := p.ensurePeriodSnapshots(dailyFiles, &weeklyFiles, serverName, databaseName, now, TierDaily, TierWeekly, baseDir); err != nil {
 			return err
 		}
-		if err := p.ensureBootstrapSnapshot(dailyFiles, &weeklyFiles, serverName, databaseName, TierDaily, TierWeekly, baseDir); err != nil {
-			return err
-		}
 	}
 	if policy.MonthlyKeep > 0 {
 		if err := p.ensurePeriodSnapshots(dailyFiles, &monthlyFiles, serverName, databaseName, now, TierDaily, TierMonthly, baseDir); err != nil {
-			return err
-		}
-		if err := p.ensureBootstrapSnapshot(dailyFiles, &monthlyFiles, serverName, databaseName, TierDaily, TierMonthly, baseDir); err != nil {
 			return err
 		}
 	}
@@ -211,35 +205,6 @@ func (p *Planner) ensurePeriodSnapshots(sourceFiles []LocalFile, destFiles *[]Lo
 		}
 		*destFiles = append(*destFiles, LocalFile{Path: destPath, Name: destName})
 	}
-	return nil
-}
-
-func (p *Planner) ensureBootstrapSnapshot(sourceFiles []LocalFile, destFiles *[]LocalFile, serverName, databaseName string, fromTier, toTier Tier, destDir string) error {
-	if len(managedCandidates(*destFiles, toTier, serverName, databaseName)) > 0 {
-		return nil
-	}
-
-	candidates := managedCandidates(sourceFiles, fromTier, serverName, databaseName)
-	if len(candidates) == 0 {
-		return nil
-	}
-
-	candidate := candidates[len(candidates)-1]
-	destName := buildManagedFilename(toTier, serverName, databaseName, candidate.Time)
-	destPath := filepath.Join(destDir, destName)
-	p.PromoteLog = append(p.PromoteLog, Promotion{
-		From: fromTier,
-		To:   toTier,
-		File: LocalFile{Path: destPath, Name: destName},
-	})
-	if p.DryRun {
-		*destFiles = append(*destFiles, LocalFile{Path: destPath, Name: destName})
-		return nil
-	}
-	if err := copyFile(candidate.File.Path, destPath); err != nil {
-		return fmt.Errorf("bootstrap %s backup %s to %s: %w", fromTier, candidate.File.Name, toTier, err)
-	}
-	*destFiles = append(*destFiles, LocalFile{Path: destPath, Name: destName})
 	return nil
 }
 
