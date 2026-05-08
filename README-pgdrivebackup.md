@@ -274,8 +274,8 @@ After that, the same backup cycle automatically manages snapshot tiers:
 
 - when a new ISO week begins, the newest daily backup from a prior week is copied into a `weekly_...gz` snapshot if that week does not already have one
 - when a new calendar month begins, the newest daily backup from a prior month is copied into a `monthly_...gz` snapshot if that month does not already have one
-- weekly snapshots are only created from backups in a completed prior ISO week
-- monthly snapshots are only created from backups in a completed prior calendar month
+- when the newest weekly snapshot is at least 7 days old, the newest daily backup is copied into a refreshed `weekly_...gz` snapshot
+- when the newest monthly snapshot is at least 1 calendar month old, the newest weekly backup is copied into a refreshed `monthly_...gz` snapshot
 - only 1 weekly and 1 monthly snapshot are kept with the default policy
 
 Cleanup is intentionally conservative:

@@ -120,6 +120,101 @@ func TestPlannerCreatesMonthlySnapshotForPreviousMonth(t *testing.T) {
 	}
 }
 
+func TestPlannerRefreshesExpiredWeeklySnapshotFromNewestDaily(t *testing.T) {
+	root := t.TempDir()
+	baseDir := filepath.Join(root, "dockerdev-wsl", "inctrak_control")
+	if err := os.MkdirAll(baseDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Date(2026, 5, 7, 2, 5, 0, 0, time.UTC)
+	for _, name := range []string{
+		"daily_dockerdev-wsl_inctrak_control_2026-05-04.gz",
+		"daily_dockerdev-wsl_inctrak_control_2026-05-05.gz",
+		"daily_dockerdev-wsl_inctrak_control_2026-05-06.gz",
+		"daily_dockerdev-wsl_inctrak_control_2026-05-07.gz",
+		"weekly_dockerdev-wsl_inctrak_control_2026-04-28.gz",
+	} {
+		if err := os.WriteFile(filepath.Join(baseDir, name), []byte(name), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	planner := &Planner{RootDir: root}
+	if err := planner.ApplyAt("dockerdev-wsl", "inctrak_control", config.RetentionPolicy{DailyKeep: 4, WeeklyKeep: 1, MonthlyKeep: 0}, now); err != nil {
+		t.Fatalf("ApplyAt() error = %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(baseDir, "weekly_dockerdev-wsl_inctrak_control_2026-05-07.gz")); err != nil {
+		t.Fatalf("expected refreshed weekly snapshot from newest daily, stat error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(baseDir, "weekly_dockerdev-wsl_inctrak_control_2026-04-28.gz")); !os.IsNotExist(err) {
+		t.Fatalf("expected expired weekly snapshot to be pruned, stat error = %v", err)
+	}
+}
+
+func TestPlannerDoesNotRefreshWeeklySnapshotBeforeItExpires(t *testing.T) {
+	root := t.TempDir()
+	baseDir := filepath.Join(root, "local", "db")
+	if err := os.MkdirAll(baseDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Date(2026, 5, 5, 2, 0, 0, 0, time.UTC)
+	for _, name := range []string{
+		"daily_local_db_2026-05-05.gz",
+		"weekly_local_db_2026-04-29.gz",
+	} {
+		if err := os.WriteFile(filepath.Join(baseDir, name), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	planner := &Planner{RootDir: root}
+	if err := planner.ApplyAt("local", "db", config.RetentionPolicy{DailyKeep: 4, WeeklyKeep: 1, MonthlyKeep: 0}, now); err != nil {
+		t.Fatalf("ApplyAt() error = %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(baseDir, "weekly_local_db_2026-05-05.gz")); !os.IsNotExist(err) {
+		t.Fatalf("expected no refreshed weekly snapshot before existing one expires, stat error = %v", err)
+	}
+}
+
+func TestPlannerRefreshesExpiredMonthlySnapshotFromNewestWeekly(t *testing.T) {
+	root := t.TempDir()
+	baseDir := filepath.Join(root, "local", "db")
+	if err := os.MkdirAll(baseDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Date(2026, 5, 7, 2, 0, 0, 0, time.UTC)
+	for _, name := range []string{
+		"daily_local_db_2026-05-07.gz",
+		"daily_local_db_2026-04-30.gz",
+		"weekly_local_db_2026-05-07.gz",
+		"monthly_local_db_2026-04-07.gz",
+	} {
+		if err := os.WriteFile(filepath.Join(baseDir, name), []byte(name), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	planner := &Planner{RootDir: root}
+	if err := planner.ApplyAt("local", "db", config.RetentionPolicy{DailyKeep: 4, WeeklyKeep: 0, MonthlyKeep: 1}, now); err != nil {
+		t.Fatalf("ApplyAt() error = %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(baseDir, "monthly_local_db_2026-05-07.gz")); err != nil {
+		t.Fatalf("expected refreshed monthly snapshot from newest weekly, stat error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(baseDir, "monthly_local_db_2026-04-30.gz")); !os.IsNotExist(err) {
+		t.Fatalf("expected prior-month daily snapshot to lose to newer weekly refresh, stat error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(baseDir, "monthly_local_db_2026-04-07.gz")); !os.IsNotExist(err) {
+		t.Fatalf("expected expired monthly snapshot to be pruned, stat error = %v", err)
+	}
+}
+
 func TestPlannerDoesNotCreateWeeklySnapshotUntilPreviousWeekExists(t *testing.T) {
 	root := t.TempDir()
 	baseDir := filepath.Join(root, "local", "db")

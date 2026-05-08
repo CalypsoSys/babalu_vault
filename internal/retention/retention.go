@@ -118,8 +118,14 @@ func (p *Planner) ApplyAt(serverName, databaseName string, policy config.Retenti
 		if err := p.ensurePeriodSnapshots(dailyFiles, &weeklyFiles, serverName, databaseName, now, TierDaily, TierWeekly, baseDir); err != nil {
 			return err
 		}
+		if err := p.refreshExpiredSnapshot(dailyFiles, &weeklyFiles, serverName, databaseName, now, TierDaily, TierWeekly, baseDir); err != nil {
+			return err
+		}
 	}
 	if policy.MonthlyKeep > 0 {
+		if err := p.refreshExpiredSnapshot(weeklyFiles, &monthlyFiles, serverName, databaseName, now, TierWeekly, TierMonthly, baseDir); err != nil {
+			return err
+		}
 		if err := p.ensurePeriodSnapshots(dailyFiles, &monthlyFiles, serverName, databaseName, now, TierDaily, TierMonthly, baseDir); err != nil {
 			return err
 		}
@@ -189,22 +195,47 @@ func (p *Planner) ensurePeriodSnapshots(sourceFiles []LocalFile, destFiles *[]Lo
 			continue
 		}
 
-		destName := buildManagedFilename(toTier, serverName, databaseName, candidate.Time)
-		destPath := filepath.Join(destDir, destName)
-		p.PromoteLog = append(p.PromoteLog, Promotion{
-			From: fromTier,
-			To:   toTier,
-			File: LocalFile{Path: destPath, Name: destName},
-		})
-		if p.DryRun {
-			*destFiles = append(*destFiles, LocalFile{Path: destPath, Name: destName})
-			continue
+		if err := p.promoteSnapshot(candidate, destFiles, serverName, databaseName, fromTier, toTier, destDir); err != nil {
+			return err
 		}
-		if err := copyFile(candidate.File.Path, destPath); err != nil {
-			return fmt.Errorf("promote %s backup %s to %s: %w", fromTier, candidate.File.Name, toTier, err)
-		}
-		*destFiles = append(*destFiles, LocalFile{Path: destPath, Name: destName})
 	}
+	return nil
+}
+
+func (p *Planner) refreshExpiredSnapshot(sourceFiles []LocalFile, destFiles *[]LocalFile, serverName, databaseName string, now time.Time, fromTier, toTier Tier, destDir string) error {
+	sources := managedCandidates(sourceFiles, fromTier, serverName, databaseName)
+	if len(sources) == 0 {
+		return nil
+	}
+	destinations := managedCandidates(*destFiles, toTier, serverName, databaseName)
+	if len(destinations) == 0 {
+		return nil
+	}
+	if !isExpiredTierSnapshot(destinations[0].Time, now, toTier) {
+		return nil
+	}
+	if hasSnapshotAt(*destFiles, toTier, sources[0].Time, serverName, databaseName) {
+		return nil
+	}
+	return p.promoteSnapshot(sources[0], destFiles, serverName, databaseName, fromTier, toTier, destDir)
+}
+
+func (p *Planner) promoteSnapshot(candidate Candidate, destFiles *[]LocalFile, serverName, databaseName string, fromTier, toTier Tier, destDir string) error {
+	destName := buildManagedFilename(toTier, serverName, databaseName, candidate.Time)
+	destPath := filepath.Join(destDir, destName)
+	p.PromoteLog = append(p.PromoteLog, Promotion{
+		From: fromTier,
+		To:   toTier,
+		File: LocalFile{Path: destPath, Name: destName},
+	})
+	if p.DryRun {
+		*destFiles = append(*destFiles, LocalFile{Path: destPath, Name: destName})
+		return nil
+	}
+	if err := copyFile(candidate.File.Path, destPath); err != nil {
+		return fmt.Errorf("promote %s backup %s to %s: %w", fromTier, candidate.File.Name, toTier, err)
+	}
+	*destFiles = append(*destFiles, LocalFile{Path: destPath, Name: destName})
 	return nil
 }
 
@@ -226,6 +257,19 @@ func managedCandidates(files []LocalFile, tier Tier, serverName, databaseName st
 	return managed
 }
 
+func hasSnapshotAt(files []LocalFile, tier Tier, ts time.Time, serverName, databaseName string) bool {
+	for _, file := range files {
+		fileTier, fileTime, ok := parseManagedFile(file.Name, serverName, databaseName)
+		if !ok || fileTier != tier {
+			continue
+		}
+		if fileTime.Equal(ts) {
+			return true
+		}
+	}
+	return false
+}
+
 func hasPeriodAt(files []LocalFile, tier Tier, ts time.Time, serverName, databaseName string) bool {
 	for _, file := range files {
 		if samePeriod(file.Name, tier, ts, serverName, databaseName) {
@@ -243,6 +287,17 @@ func isPastTierPeriod(candidateTime, now time.Time, tier Tier) bool {
 		return cy != ny || cw != nw
 	case TierMonthly:
 		return candidateTime.Year() != now.Year() || candidateTime.Month() != now.Month()
+	default:
+		return false
+	}
+}
+
+func isExpiredTierSnapshot(snapshotTime, now time.Time, tier Tier) bool {
+	switch tier {
+	case TierWeekly:
+		return !snapshotTime.AddDate(0, 0, 7).After(now)
+	case TierMonthly:
+		return !snapshotTime.AddDate(0, 1, 0).After(now)
 	default:
 		return false
 	}
