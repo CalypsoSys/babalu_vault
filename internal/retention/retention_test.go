@@ -91,6 +91,36 @@ func TestPlannerCreatesWeeklySnapshotForPreviousWeek(t *testing.T) {
 	}
 }
 
+func TestPlannerPreservesTypedExtensionWhenPromotingSnapshots(t *testing.T) {
+	root := t.TempDir()
+	baseDir := filepath.Join(root, "mysql-backup", "wordpress")
+	if err := os.MkdirAll(baseDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Date(2026, 4, 27, 2, 0, 0, 0, time.UTC)
+	for _, name := range []string{
+		"daily_mysql-backup_wordpress_2026-04-27.sql.gz",
+		"daily_mysql-backup_wordpress_2026-04-26.sql.gz",
+	} {
+		if err := os.WriteFile(filepath.Join(baseDir, name), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	planner := &Planner{RootDir: root, Extension: ".sql.gz"}
+	if err := planner.ApplyAt("mysql-backup", "wordpress", config.RetentionPolicy{DailyKeep: 2, WeeklyKeep: 1, MonthlyKeep: 0}, now); err != nil {
+		t.Fatalf("ApplyAt() error = %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(baseDir, "weekly_mysql-backup_wordpress_2026-04-26.sql.gz")); err != nil {
+		t.Fatalf("expected weekly snapshot to keep .sql.gz extension, stat error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(baseDir, "weekly_mysql-backup_wordpress_2026-04-26.gz")); !os.IsNotExist(err) {
+		t.Fatalf("expected legacy .gz promotion not to be created, stat error = %v", err)
+	}
+}
+
 func TestPlannerCreatesMonthlySnapshotForPreviousMonth(t *testing.T) {
 	root := t.TempDir()
 	baseDir := filepath.Join(root, "local", "db")

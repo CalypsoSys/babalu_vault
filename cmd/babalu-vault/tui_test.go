@@ -17,16 +17,17 @@ func TestReconcileStatusesPreservesExistingResults(t *testing.T) {
 	cfg := &config.Config{
 		Retention: config.RetentionPolicy{DailyKeep: 14, WeeklyKeep: 8, MonthlyKeep: 12},
 		Servers: []config.ServerConfig{
+			{Name: "local", Type: "tcp", Host: "localhost"},
+		},
+		Backups: []config.BackupConfig{
 			{
-				Name:     "local",
-				Type:     "tcp",
-				Host:     "localhost",
-				Port:     5432,
-				Username: "postgres",
-				Password: "${DB_PASSWORD}",
-				Databases: []config.DatabaseConfig{
-					{Name: "app"},
-					{Name: "audit", Retention: &config.RetentionPolicy{DailyKeep: 30, WeeklyKeep: 12, MonthlyKeep: 6}},
+				Name:   "local-postgres",
+				Server: "local",
+				Engine: "postgres",
+				Source: &config.SourceConfig{Mode: "tcp", Port: 5432, Username: "postgres", Password: "${DB_PASSWORD}"},
+				Targets: []config.TargetConfig{
+					{Name: "app", Database: "app"},
+					{Name: "audit", Database: "audit", Retention: &config.RetentionPolicy{DailyKeep: 30, WeeklyKeep: 12, MonthlyKeep: 6}},
 				},
 			},
 		},
@@ -34,8 +35,9 @@ func TestReconcileStatusesPreservesExistingResults(t *testing.T) {
 	previous := []databaseStatus{
 		{
 			Server:      "local",
+			Backup:      "local-postgres",
 			Database:    "app",
-			Method:      "tcp",
+			Method:      "postgres",
 			Retention:   config.RetentionPolicy{DailyKeep: 14, WeeklyKeep: 8, MonthlyKeep: 12},
 			LastStatus:  "ok",
 			LastError:   "",
@@ -74,18 +76,25 @@ func TestReloadConfigIfChangedAppliesNewScheduleAndTargets(t *testing.T) {
 	}
 
 	writeConfig(`
-backup:
+settings:
   root_dir: "./backups"
   time_of_day: "02:00"
 servers:
   - name: "local"
     type: "tcp"
     host: "localhost"
-    port: 5432
-    username: "postgres"
-    password: "${DB_PASSWORD}"
-    databases:
+backups:
+  - name: "local-postgres"
+    server: "local"
+    engine: "postgres"
+    source:
+      mode: "tcp"
+      port: 5432
+      username: "postgres"
+      password: "${DB_PASSWORD}"
+    targets:
       - name: "app"
+        database: "app"
 `)
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -99,18 +108,26 @@ servers:
 
 	time.Sleep(1100 * time.Millisecond)
 	writeConfig(`
-backup:
+settings:
   root_dir: "./backups"
   time_of_day: "04:30"
 servers:
   - name: "local"
     type: "docker"
-    username: "postgres"
-    password: "${DB_PASSWORD}"
-    container: "postgres"
-    databases:
+backups:
+  - name: "local-postgres"
+    server: "local"
+    engine: "postgres"
+    source:
+      mode: "docker"
+      username: "postgres"
+      password: "${DB_PASSWORD}"
+      container: "postgres"
+    targets:
       - name: "app"
+        database: "app"
       - name: "audit"
+        database: "audit"
 `)
 
 	m.reloadConfigIfChanged()
@@ -121,7 +138,7 @@ servers:
 	if len(m.statuses) != 2 {
 		t.Fatalf("expected 2 statuses after reload, got %d", len(m.statuses))
 	}
-	if m.statuses[0].Method != "docker" || m.statuses[0].LastStatus != "ok" || m.statuses[0].LastSize != 42 {
+	if m.statuses[0].Method != "postgres" || m.statuses[0].LastStatus != "ok" || m.statuses[0].LastSize != 42 {
 		t.Fatalf("expected existing target state to survive reload, got %+v", m.statuses[0])
 	}
 	if m.statuses[1].Database != "audit" || m.statuses[1].LastStatus != "pending" {
@@ -134,8 +151,9 @@ func TestBackupProgressMarksMatchingTargetRunning(t *testing.T) {
 		statuses: []databaseStatus{
 			{
 				Server:     "local",
+				Backup:     "local-postgres",
 				Database:   "app",
-				Method:     "tcp",
+				Method:     "postgres",
 				LastStatus: "pending",
 			},
 		},
@@ -143,8 +161,9 @@ func TestBackupProgressMarksMatchingTargetRunning(t *testing.T) {
 
 	m.markStatusRunning(backup.SummaryRow{
 		Server:   "local",
+		Backup:   "local-postgres",
 		Database: "app",
-		Method:   "tcp",
+		Method:   "postgres",
 		Status:   "running",
 	})
 
@@ -163,8 +182,9 @@ func TestBackupFinishedSkipsDuplicateStartedActivity(t *testing.T) {
 		rows: []backup.SummaryRow{
 			{
 				Server:   "local",
+				Backup:   "local-postgres",
 				Database: "app",
-				Method:   "tcp",
+				Method:   "postgres",
 				Status:   "ok",
 				Operations: []backup.OperationEntry{
 					{Level: "info", Message: "backup started"},
@@ -179,7 +199,7 @@ func TestBackupFinishedSkipsDuplicateStartedActivity(t *testing.T) {
 
 	count := 0
 	for _, event := range got.events {
-		if event.Message == "local/app [tcp] backup started" {
+		if event.Message == "local/local-postgres/app [postgres] backup started" {
 			count++
 		}
 	}

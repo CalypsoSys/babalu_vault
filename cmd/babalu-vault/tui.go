@@ -33,6 +33,7 @@ type backupFinishedMsg struct {
 
 type databaseStatus struct {
 	Server      string
+	Backup      string
 	Database    string
 	Method      string
 	Retention   config.RetentionPolicy
@@ -93,27 +94,26 @@ type model struct {
 }
 
 func newModel(configPath string, cfg *config.Config, dryRun bool, logger *slog.Logger) model {
-	hour, minute, err := cfg.Backup.ScheduledTimeOfDay()
+	hour, minute, err := cfg.Settings.ScheduledTimeOfDay()
 	if err != nil {
 		hour = 2
 		minute = 0
 	}
 	now := time.Now()
-	state, stateErr := loadSchedulerState(cfg.Backup.StatePath)
+	state, stateErr := loadSchedulerState(cfg.Settings.StatePath)
 
 	statuses := make([]databaseStatus, 0)
-	for _, server := range cfg.Servers {
-		for _, database := range server.Databases {
-			statuses = append(statuses, databaseStatus{
-				Server:     server.Name,
-				Database:   database.Name,
-				Method:     server.Type,
-				Retention:  cfg.RetentionFor(database),
-				LastStatus: "pending",
-			})
-		}
+	for _, item := range cfg.Filter("", "", "") {
+		statuses = append(statuses, databaseStatus{
+			Server:     item.Server.Name,
+			Backup:     item.Backup.Name,
+			Database:   item.Target.Name,
+			Method:     item.Backup.Engine,
+			Retention:  item.Retention,
+			LastStatus: "pending",
+		})
 	}
-	if dryRun || cfg.Backup.DryRun {
+	if dryRun || cfg.Settings.DryRun {
 		statuses = expandDryRunStatuses(statuses)
 	}
 
@@ -183,7 +183,7 @@ func waitBackupMsgCmd(msgs <-chan tea.Msg) tea.Cmd {
 func runBackupCmd(msgs chan<- tea.Msg, cfg *config.Config, logger *slog.Logger, automatic bool, dryRun bool) tea.Cmd {
 	return func() tea.Msg {
 		started := time.Now()
-		rows, err := executeBackupWithProgress(logger, cfg, "", "", dryRun || cfg.Backup.DryRun, func(row backup.SummaryRow) {
+		rows, err := executeBackupWithProgress(logger, cfg, "", "", "", dryRun || cfg.Settings.DryRun, func(row backup.SummaryRow) {
 			msgs <- backupProgressMsg{row: row}
 		})
 		msgs <- backupFinishedMsg{
@@ -305,7 +305,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tickCmd()
 	case backupProgressMsg:
 		m.markStatusRunning(msg.row)
-		m.addActivity("info", fmt.Sprintf("%s/%s [%s] backup started", msg.row.Server, msg.row.Database, msg.row.Method))
+		m.addActivity("info", fmt.Sprintf("%s/%s/%s [%s] backup started", msg.row.Server, msg.row.Backup, msg.row.Database, msg.row.Method))
 		m.syncViewports()
 		if m.backupMsgs != nil {
 			return m, waitBackupMsgCmd(m.backupMsgs)
@@ -317,8 +317,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.backupMsgs = nil
 		m.lastRun = msg.finishedAt
 		m.now = msg.finishedAt
-		if !(m.dryRun || m.cfg.Backup.DryRun) {
-			if err := saveSchedulerState(m.cfg.Backup.StatePath, schedulerState{LastRunAt: msg.finishedAt}); err != nil {
+		if !(m.dryRun || m.cfg.Settings.DryRun) {
+			if err := saveSchedulerState(m.cfg.Settings.StatePath, schedulerState{LastRunAt: msg.finishedAt}); err != nil {
 				m.recordEvent("warn", fmt.Sprintf("failed to persist scheduler state: %v", err))
 				if m.lastError == "" {
 					m.lastError = err.Error()
@@ -343,7 +343,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if op.Message == "backup started" {
 					continue
 				}
-				m.addActivity(op.Level, fmt.Sprintf("%s/%s [%s] %s", row.Server, row.Database, row.Method, op.Message))
+				m.addActivity(op.Level, fmt.Sprintf("%s/%s/%s [%s] %s", row.Server, row.Backup, row.Database, row.Method, op.Message))
 			}
 		}
 		m.syncViewports()
@@ -375,7 +375,7 @@ func (m *model) reloadConfigIfChanged() {
 		return
 	}
 
-	hour, minute, err := cfg.Backup.ScheduledTimeOfDay()
+	hour, minute, err := cfg.Settings.ScheduledTimeOfDay()
 	if err != nil {
 		m.configModTime = modTime
 		m.configSize = size
@@ -388,7 +388,7 @@ func (m *model) reloadConfigIfChanged() {
 	m.configSize = size
 	m.scheduleHour = hour
 	m.scheduleMin = minute
-	m.statuses = reconcileStatuses(m.statuses, cfg, m.dryRun || cfg.Backup.DryRun)
+	m.statuses = reconcileStatuses(m.statuses, cfg, m.dryRun || cfg.Settings.DryRun)
 	if m.selected >= len(m.statuses) {
 		m.selected = len(m.statuses) - 1
 	}
@@ -417,7 +417,7 @@ func (m *model) toggleFocus() {
 
 func (m *model) updateStatus(row backup.SummaryRow, at time.Time) {
 	for i := range m.statuses {
-		if m.statuses[i].Server == row.Server && m.statuses[i].Database == row.Database {
+		if m.statuses[i].Server == row.Server && m.statuses[i].Backup == row.Backup && m.statuses[i].Database == row.Database {
 			m.statuses[i].LastStatus = row.Status
 			m.statuses[i].LastRun = at
 			m.statuses[i].LastSize = row.SizeBytes
@@ -429,6 +429,7 @@ func (m *model) updateStatus(row backup.SummaryRow, at time.Time) {
 	}
 	m.statuses = append(m.statuses, databaseStatus{
 		Server:      row.Server,
+		Backup:      row.Backup,
 		Database:    row.Database,
 		Method:      row.Method,
 		Retention:   row.Retention,
@@ -443,7 +444,7 @@ func (m *model) updateStatus(row backup.SummaryRow, at time.Time) {
 
 func (m *model) markStatusRunning(row backup.SummaryRow) {
 	for i := range m.statuses {
-		if m.statuses[i].Server == row.Server && m.statuses[i].Database == row.Database {
+		if m.statuses[i].Server == row.Server && m.statuses[i].Backup == row.Backup && m.statuses[i].Database == row.Database {
 			m.statuses[i].LastStatus = "running"
 			m.statuses[i].Method = row.Method
 			return
@@ -451,6 +452,7 @@ func (m *model) markStatusRunning(row backup.SummaryRow) {
 	}
 	m.statuses = append(m.statuses, databaseStatus{
 		Server:     row.Server,
+		Backup:     row.Backup,
 		Database:   row.Database,
 		Method:     row.Method,
 		Retention:  row.Retention,
@@ -505,27 +507,27 @@ func expandDryRunStatuses(base []databaseStatus) []databaseStatus {
 func reconcileStatuses(previous []databaseStatus, cfg *config.Config, dryRun bool) []databaseStatus {
 	byKey := make(map[string]databaseStatus, len(previous))
 	for _, status := range previous {
-		byKey[status.Server+"\x00"+status.Database] = status
+		byKey[status.Server+"\x00"+status.Backup+"\x00"+status.Database] = status
 	}
 
 	statuses := make([]databaseStatus, 0)
-	for _, server := range cfg.Servers {
-		for _, database := range server.Databases {
-			key := server.Name + "\x00" + database.Name
-			status, ok := byKey[key]
-			if !ok {
-				status = databaseStatus{
-					Server:     server.Name,
-					Database:   database.Name,
-					LastStatus: "pending",
-				}
+	for _, item := range cfg.Filter("", "", "") {
+		key := item.Server.Name + "\x00" + item.Backup.Name + "\x00" + item.Target.Name
+		status, ok := byKey[key]
+		if !ok {
+			status = databaseStatus{
+				Server:     item.Server.Name,
+				Backup:     item.Backup.Name,
+				Database:   item.Target.Name,
+				LastStatus: "pending",
 			}
-			status.Server = server.Name
-			status.Database = database.Name
-			status.Method = server.Type
-			status.Retention = cfg.RetentionFor(database)
-			statuses = append(statuses, status)
 		}
+		status.Server = item.Server.Name
+		status.Backup = item.Backup.Name
+		status.Database = item.Target.Name
+		status.Method = item.Backup.Engine
+		status.Retention = item.Retention
+		statuses = append(statuses, status)
 	}
 
 	if dryRun {
@@ -712,9 +714,9 @@ func renderHeaderCard(m model, palette styles) string {
 		identity,
 		"",
 		palette.muted.Render(fmt.Sprintf("config %s", m.configPath)),
-		palette.muted.Render(fmt.Sprintf("backup root %s", m.cfg.Backup.RootDir)),
+		palette.muted.Render(fmt.Sprintf("backup root %s", m.cfg.Settings.RootDir)),
 		palette.muted.Render(fmt.Sprintf("daily time %02d:%02d", m.scheduleHour, m.scheduleMin)),
-		palette.muted.Render(fmt.Sprintf("dry-run %t", m.dryRun || m.cfg.Backup.DryRun)),
+		palette.muted.Render(fmt.Sprintf("dry-run %t", m.dryRun || m.cfg.Settings.DryRun)),
 	}
 	return strings.Join(lines, "\n")
 }
@@ -799,9 +801,10 @@ func renderStatusesContent(m model) (string, int) {
 			selectedLine = len(lines)
 		}
 
-		lines = append(lines, rowStyle.Render(fmt.Sprintf("%s %s/%s [%s] %s",
+		lines = append(lines, rowStyle.Render(fmt.Sprintf("%s %s/%s/%s [%s] %s",
 			cursor,
 			status.Server,
+			status.Backup,
 			status.Database,
 			status.Method,
 			stateStyle.Render(status.LastStatus),
@@ -901,7 +904,7 @@ func renderDetailsOverlay(base string, m model, palette styles) string {
 
 	lines := []string{
 		palette.section.Render("Selected Target"),
-		fmt.Sprintf("%s/%s [%s]", selected.Server, selected.Database, selected.Method),
+		fmt.Sprintf("%s/%s/%s [%s]", selected.Server, selected.Backup, selected.Database, selected.Method),
 		palette.muted.Render(fmt.Sprintf("last run %s", formatTime(selected.LastRun))),
 		palette.muted.Render(fmt.Sprintf("status %s", selected.LastStatus)),
 		palette.muted.Render(fmt.Sprintf("retention d%d w%d m%d", selected.Retention.DailyKeep, selected.Retention.WeeklyKeep, selected.Retention.MonthlyKeep)),
@@ -954,13 +957,13 @@ func (m model) selectedStatus() *databaseStatus {
 	return &m.statuses[m.selected]
 }
 
-func (m model) selectedDatabaseConfig() *config.SelectedDatabase {
+func (m model) selectedDatabaseConfig() *config.SelectedTarget {
 	selected := m.selectedStatus()
 	if selected == nil {
 		return nil
 	}
-	for _, item := range m.cfg.Filter(selected.Server, selected.Database) {
-		if item.Server.Name == selected.Server && item.Database.Name == selected.Database {
+	for _, item := range m.cfg.Filter(selected.Server, selected.Backup, selected.Database) {
+		if item.Server.Name == selected.Server && item.Backup.Name == selected.Backup && item.Target.Name == selected.Database {
 			copy := item
 			return &copy
 		}

@@ -1,4 +1,4 @@
-backup:
+settings:
   temp_dir: "./tmp"
   root_dir: "./backups"
   log_path: "./logs/babalu-vault.log"
@@ -13,48 +13,65 @@ retention:
   monthly_keep: 1
 
 servers:
-  - name: "localdev"
+  - name: "local-postgres-host"
     type: "tcp"
     host: "localhost"
-    port: 5432
-    username: "postgres"
-    password: "${LOCALDEV_POSTGRES_PASSWORD}"
-    databases:
-      - name: "ommadb_dev"
-      - name: "wordpress_dev"
 
-  - name: "dockerdev"
+  - name: "local-docker"
     type: "docker"
-    container: "dev-postgres"
-    username: "postgres"
-    password: "${LOCALDEV_POSTGRES_PASSWORD}"
-    discover_databases: true
-    ignore_databases:
-      - "postgres"
-      - "template0"
-      - "template1"
-    databases:
-      - name: "app1_dev"
-      - name: "app2_dev"
 
-  - name: "sshdocker"
+  - name: "homelab-wp-host"
     type: "ssh"
-    ssh_target: "backup@example-host"
-    ssh_remote_type: "docker"
-    container: "ommadb-postgres"
-    username: "postgres"
-    password: "${REMOTE_POSTGRES_PASSWORD}"
-    databases:
-      - name: "mma_data_web"
-
-  - name: "sshtcp"
-    type: "ssh"
-    ssh_target: "backup@db-host"
+    ssh_target: "backup@homelab-wp-host"
     ssh_port: 22
-    ssh_remote_type: "tcp"
-    host: "127.0.0.1"
-    port: 5432
-    username: "postgres"
-    password: "${REMOTE_POSTGRES_PASSWORD}"
-    databases:
-      - name: "reporting"
+
+backups:
+  - name: "local-postgres"
+    server: "local-postgres-host"
+    engine: "postgres"
+    source:
+      mode: "tcp"
+      port: 5432
+      username: "postgres"
+      password: "${LOCALDEV_POSTGRES_PASSWORD}"
+    targets:
+      - name: "ommadb-dev"
+        database: "ommadb_dev"
+      - name: "wordpress-dev"
+        database: "wordpress_dev"
+
+  - name: "local-docker-postgres"
+    server: "local-docker"
+    engine: "postgres"
+    source:
+      mode: "docker"
+      container: "dev-postgres"
+      username: "postgres"
+      password: "${LOCALDEV_POSTGRES_PASSWORD}"
+    targets:
+      - name: "app1-dev"
+        database: "app1_dev"
+      - name: "app2-dev"
+        database: "app2_dev"
+
+  - name: "dndboomer-mysql"
+    server: "homelab-wp-host"
+    engine: "mysql"
+    source:
+      mode: "docker"
+      container: "dndboomer_wp_db"
+      username: "root"
+      password_env: "MYSQL_ROOT_PASSWORD"
+    targets:
+      - name: "dndboomer-db"
+        database: "wordpress"
+
+  - name: "homelab-wp-files"
+    server: "homelab-wp-host"
+    engine: "files"
+    targets:
+      - name: "dndboomer-html"
+        path: "/srv/stacks/wordpress/sites/dndboomer/html"
+        excludes:
+          - "wp-content/cache/**"
+          - "wp-content/debug.log"

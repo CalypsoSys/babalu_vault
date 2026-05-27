@@ -48,7 +48,7 @@ func newConfiguredLogger(args []string) (*slog.Logger, interface{ Close() error 
 		}
 	}
 	if cfg, err := config.Load(configPath); err == nil {
-		return logging.New(cfg.Backup.LogPath)
+		return logging.New(cfg.Settings.LogPath)
 	}
 	return logging.New("")
 }
@@ -105,7 +105,7 @@ func runUI(configPath string, dryRun bool) error {
 	if err != nil {
 		return err
 	}
-	logger, closer, err := logging.NewForTUI(cfg.Backup.LogPath)
+	logger, closer, err := logging.NewForTUI(cfg.Settings.LogPath)
 	if err != nil {
 		return err
 	}
@@ -120,15 +120,15 @@ func runList(configPath string) error {
 	if err != nil {
 		return err
 	}
-	targets, err := backup.ResolveTargets(context.Background(), cfg, "", "")
+	targets, err := backup.ResolveTargets(context.Background(), cfg, "", "", "")
 	if err != nil {
 		return err
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "SERVER\tTYPE\tTARGET\tRETENTION")
+	fmt.Fprintln(w, "SERVER\tBACKUP\tTYPE\tTARGET\tRETENTION")
 	for _, item := range targets {
 		r := item.Retention
-		fmt.Fprintf(w, "%s\t%s\t%s\tdaily=%d weekly=%d monthly=%d\n", item.Server.Name, item.Server.Type, item.Database.Name, r.DailyKeep, r.WeeklyKeep, r.MonthlyKeep)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\tdaily=%d weekly=%d monthly=%d\n", item.Server.Name, item.Backup.Name, item.Backup.Engine, item.Target.Name, r.DailyKeep, r.WeeklyKeep, r.MonthlyKeep)
 	}
 	return w.Flush()
 }
@@ -138,6 +138,7 @@ func runBackup(logger *slog.Logger, configPath string, args []string) error {
 	fs.SetOutput(os.Stderr)
 
 	serverName := fs.String("server", "", "Limit to one configured server")
+	backupName := fs.String("backup", "", "Limit to one configured backup")
 	targetName := fs.String("target", "", "Limit to one configured target")
 	dryRun := fs.Bool("dry-run", false, "Print planned actions without creating backups or deleting old backups")
 
@@ -152,7 +153,7 @@ func runBackup(logger *slog.Logger, configPath string, args []string) error {
 	if err != nil {
 		return err
 	}
-	rows, runErr := executeBackup(logger, cfg, *serverName, *targetName, *dryRun || cfg.Backup.DryRun)
+	rows, runErr := executeBackup(logger, cfg, *serverName, *backupName, *targetName, *dryRun || cfg.Settings.DryRun)
 	printSummary(rows)
 	if runErr != nil {
 		var pathErr *os.PathError
@@ -164,17 +165,17 @@ func runBackup(logger *slog.Logger, configPath string, args []string) error {
 	return nil
 }
 
-func executeBackup(logger *slog.Logger, cfg *config.Config, serverName, targetName string, dryRun bool) ([]backup.SummaryRow, error) {
-	return executeBackupWithProgress(logger, cfg, serverName, targetName, dryRun, nil)
+func executeBackup(logger *slog.Logger, cfg *config.Config, serverName, backupName, targetName string, dryRun bool) ([]backup.SummaryRow, error) {
+	return executeBackupWithProgress(logger, cfg, serverName, backupName, targetName, dryRun, nil)
 }
 
-func executeBackupWithProgress(logger *slog.Logger, cfg *config.Config, serverName, targetName string, dryRun bool, progress func(backup.SummaryRow)) ([]backup.SummaryRow, error) {
+func executeBackupWithProgress(logger *slog.Logger, cfg *config.Config, serverName, backupName, targetName string, dryRun bool, progress func(backup.SummaryRow)) ([]backup.SummaryRow, error) {
 	runner := &backup.Runner{
 		Config:   cfg,
 		Logger:   logger,
 		Progress: progress,
 	}
-	return runner.Run(context.Background(), serverName, targetName, dryRun)
+	return runner.Run(context.Background(), serverName, backupName, targetName, dryRun)
 }
 
 func printRootUsage() {
@@ -196,14 +197,15 @@ func printSummary(rows []backup.SummaryRow) {
 		return
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "SERVER\tTARGET\tMETHOD\tSTATUS\tSIZE\tDURATION\tDETAIL")
+	fmt.Fprintln(w, "SERVER\tBACKUP\tTARGET\tMETHOD\tSTATUS\tSIZE\tDURATION\tDETAIL")
 	for _, row := range rows {
 		detail := strings.Join(row.StoredPaths, ", ")
 		if row.Error != "" {
 			detail = row.Error
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
 			row.Server,
+			row.Backup,
 			row.Database,
 			row.Method,
 			row.Status,

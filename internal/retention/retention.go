@@ -40,6 +40,7 @@ type Promotion struct {
 type Planner struct {
 	RootDir    string
 	DryRun     bool
+	Extension  string
 	DeleteLog  []Deletion
 	PromoteLog []Promotion
 }
@@ -49,7 +50,7 @@ type LocalFile struct {
 	Name string
 }
 
-var managedFilenamePattern = regexp.MustCompile(`^(daily|weekly|monthly)_.+_.+_\d{4}-\d{2}-\d{2}\.gz$`)
+var managedFilenamePattern = regexp.MustCompile(`^(daily|weekly|monthly)_.+_.+_\d{4}-\d{2}-\d{2}(\.sql|\.tar)?\.gz$`)
 
 func SelectExcess(files []LocalFile, keep int, tier Tier, serverName, databaseName string) []LocalFile {
 	if keep < 0 {
@@ -221,7 +222,7 @@ func (p *Planner) refreshExpiredSnapshot(sourceFiles []LocalFile, destFiles *[]L
 }
 
 func (p *Planner) promoteSnapshot(candidate Candidate, destFiles *[]LocalFile, serverName, databaseName string, fromTier, toTier Tier, destDir string) error {
-	destName := buildManagedFilename(toTier, serverName, databaseName, candidate.Time)
+	destName := buildManagedFilename(toTier, serverName, databaseName, candidate.Time, p.extension())
 	destPath := filepath.Join(destDir, destName)
 	p.PromoteLog = append(p.PromoteLog, Promotion{
 		From: fromTier,
@@ -358,7 +359,7 @@ func parseManagedFile(filename, serverName, databaseName string) (Tier, time.Tim
 		if !managedFilenamePattern.MatchString(filename) {
 			return "", time.Time{}, false
 		}
-		tsPart := strings.TrimSuffix(suffix, ".gz")
+		tsPart := trimManagedExtension(suffix)
 		ts, err := time.Parse("2006-01-02", tsPart)
 		if err != nil {
 			return "", time.Time{}, false
@@ -368,6 +369,22 @@ func parseManagedFile(filename, serverName, databaseName string) (Tier, time.Tim
 	return "", time.Time{}, false
 }
 
-func buildManagedFilename(tier Tier, serverName, databaseName string, ts time.Time) string {
-	return fmt.Sprintf("%s_%s_%s_%s.gz", tier, serverName, databaseName, ts.Format("2006-01-02"))
+func buildManagedFilename(tier Tier, serverName, databaseName string, ts time.Time, extension string) string {
+	return fmt.Sprintf("%s_%s_%s_%s%s", tier, serverName, databaseName, ts.Format("2006-01-02"), extension)
+}
+
+func (p *Planner) extension() string {
+	if p.Extension == "" {
+		return ".gz"
+	}
+	return p.Extension
+}
+
+func trimManagedExtension(value string) string {
+	for _, extension := range []string{".sql.gz", ".tar.gz", ".gz"} {
+		if strings.HasSuffix(value, extension) {
+			return strings.TrimSuffix(value, extension)
+		}
+	}
+	return value
 }

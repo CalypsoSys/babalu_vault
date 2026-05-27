@@ -3,26 +3,28 @@
 This repository contains:
 
 - `postgres-dev/`: a shared local PostgreSQL 18 Docker Compose setup intended for Windows, WSL, and Docker Desktop workflows.
-- `babalu-vault`: a Go command-line utility that backs up one or more PostgreSQL database targets to local storage and applies rotating retention rules.
+- `babalu-vault`: a Go command-line utility that backs up configured PostgreSQL, MySQL, and file-set targets to local storage and applies rotating retention rules.
 - `codex-slack-notify`: a Go helper that posts Codex completion or attention alerts to a Slack incoming webhook.
 
-## PostgreSQL Client Tools
+## Backup Client Tools
 
-`babalu-vault` uses the local PostgreSQL client tools when you configure a server with `type: tcp`. In practice, that means `pg_dump` must be installed and available on `PATH`.
+`babalu-vault` uses local client tools only for local TCP backup sources. PostgreSQL TCP backups need `pg_dump` and `psql`; MySQL TCP backups need `mysqldump`.
 
 Common installation options:
 
 - Windows: install PostgreSQL from the official installer and include the client tools, then ensure the `bin` directory containing `pg_dump.exe` is on `PATH`.
-- Debian/Ubuntu: `sudo apt install postgresql-client`
+- Debian/Ubuntu: `sudo apt install postgresql-client mysql-client`
 - macOS with Homebrew: `brew install libpq` and, if needed, add the Homebrew `libpq/bin` directory to `PATH`
 
 Quick verification:
 
 ```bash
 pg_dump --version
+psql --version
+mysqldump --version
 ```
 
-If you use only `type: docker` or `type: ssh`, local PostgreSQL client tools are not required for those backup targets.
+If you use only Docker or SSH-backed backup targets, local database client tools are not required for those targets. The command runs inside the configured container or on the remote host.
 
 Start with:
 

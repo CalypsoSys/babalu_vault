@@ -14,5 +14,5 @@ dist/
 .codex
 .cache/*
 bin/*
-configs/calypsosys.yaml
+configs/calypsosys*.yaml
 configs/state/
