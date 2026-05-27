@@ -1,6 +1,6 @@
-# pgdrivebackup
+# babalu-vault
 
-`pgdrivebackup` is a Go terminal application for backing up PostgreSQL databases to a local backup directory with gzip compression and automatic daily, weekly, and monthly promotion.
+`babalu-vault` is a Go terminal application for backing up PostgreSQL database targets to a local backup directory with gzip compression and automatic daily, weekly, and monthly promotion.
 
 It supports:
 
@@ -16,14 +16,14 @@ It supports:
 - Local filesystem storage under a configured backup root
 - Daily, weekly, and monthly lifecycle folders
 - Dry-run mode
-- Config-based filtering by server and database
+- Config-based filtering by server and target
 
 ## Repository layout
 
 ```text
 configs/
   example.yaml
-cmd/pgdrivebackup/main.go
+cmd/babalu-vault/main.go
 internal/config/
 internal/backup/
 internal/retention/
@@ -66,10 +66,10 @@ Key config fields:
 backup:
   temp_dir: "./tmp"
   root_dir: "./backups"
-  log_path: "./logs/pgdrivebackup.log"
+  log_path: "./logs/babalu-vault.log"
   gzip_level: 6
   time_of_day: "02:00"
-  state_path: "./state/pgdrivebackup-scheduler.json"
+  state_path: "./state/babalu-vault-scheduler.json"
 ```
 
 Backups are stored under:
@@ -97,7 +97,7 @@ With the default settings, each database keeps at most 6 managed backups:
 Launch the continuous terminal UI:
 
 ```bash
-go run ./cmd/pgdrivebackup --config configs/example.yaml
+go run ./cmd/babalu-vault --config configs/example.yaml
 ```
 
 The TUI keeps running and schedules one automatic backup per local calendar day at `backup.time_of_day`. On startup, it checks `backup.state_path` and runs immediately if it has not already run yet that day.
@@ -107,7 +107,7 @@ While the TUI is running, it also watches the YAML config file for changes and r
 Launch the TUI in dry-run mode:
 
 ```bash
-go run ./cmd/pgdrivebackup --config configs/example.yaml --dry-run
+go run ./cmd/babalu-vault --config configs/example.yaml --dry-run
 ```
 
 TUI controls:
@@ -115,7 +115,7 @@ TUI controls:
 - `/`: open the command palette
 - `b`: run backup now
 - `p`: pause or resume the scheduler
-- `j` / `k`: move through configured databases
+- `j` / `k`: move through configured targets
 - `q`: quit
 
 One-shot commands are still available.
@@ -123,37 +123,37 @@ One-shot commands are still available.
 List backup targets:
 
 ```bash
-go run ./cmd/pgdrivebackup --config configs/example.yaml list
+go run ./cmd/babalu-vault --config configs/example.yaml list
 ```
 
 Back up everything:
 
 ```bash
-go run ./cmd/pgdrivebackup --config configs/example.yaml backup
+go run ./cmd/babalu-vault --config configs/example.yaml backup
 ```
 
 Back up a single server:
 
 ```bash
-go run ./cmd/pgdrivebackup --config configs/example.yaml backup --server localdev
+go run ./cmd/babalu-vault --config configs/example.yaml backup --server localdev
 ```
 
-Back up one database:
+Back up one target:
 
 ```bash
-go run ./cmd/pgdrivebackup --config configs/example.yaml backup --server localdev --database app1_dev
+go run ./cmd/babalu-vault --config configs/example.yaml backup --server localdev --target app1_dev
 ```
 
 Dry run:
 
 ```bash
-go run ./cmd/pgdrivebackup --config configs/example.yaml backup --dry-run
+go run ./cmd/babalu-vault --config configs/example.yaml backup --dry-run
 ```
 
 Version:
 
 ```bash
-go run ./cmd/pgdrivebackup version
+go run ./cmd/babalu-vault version
 ```
 
 ## Database discovery mode
@@ -268,7 +268,7 @@ retention:
   monthly_keep: 1
 ```
 
-Each successful run writes one new `daily_...gz` backup into the database directory.
+Each successful run writes one new `daily_...gz` backup into the target directory.
 
 After that, the same backup cycle automatically manages snapshot tiers:
 
@@ -328,13 +328,13 @@ For a Windows development machine, prefer Windows Task Scheduler over WSL cron b
 Example action:
 
 ```powershell
-C:\path\to\pgdrivebackup.exe --config C:\path\to\configs\local.yaml
+C:\path\to\babalu-vault.exe --config C:\path\to\configs\local.yaml
 ```
 
 ### Linux cron
 
 ```cron
-@reboot /usr/local/bin/pgdrivebackup --config /etc/pgdrivebackup/config.yaml
+@reboot /usr/local/bin/babalu-vault --config /etc/babalu-vault/config.yaml
 ```
 
 ### systemd service
@@ -343,12 +343,12 @@ Service example:
 
 ```ini
 [Unit]
-Description=pgdrivebackup TUI scheduler
+Description=babalu-vault TUI scheduler
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/pgdrivebackup
-ExecStart=/usr/local/bin/pgdrivebackup --config /etc/pgdrivebackup/config.yaml
+WorkingDirectory=/opt/babalu-vault
+ExecStart=/usr/local/bin/babalu-vault --config /etc/babalu-vault/config.yaml
 Restart=always
 RestartSec=10
 
@@ -374,5 +374,5 @@ go test ./...
 Build:
 
 ```bash
-go build ./cmd/pgdrivebackup
+go build ./cmd/babalu-vault
 ```

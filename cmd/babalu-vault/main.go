@@ -125,7 +125,7 @@ func runList(configPath string) error {
 		return err
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "SERVER\tTYPE\tDATABASE\tRETENTION")
+	fmt.Fprintln(w, "SERVER\tTYPE\tTARGET\tRETENTION")
 	for _, item := range targets {
 		r := item.Retention
 		fmt.Fprintf(w, "%s\t%s\t%s\tdaily=%d weekly=%d monthly=%d\n", item.Server.Name, item.Server.Type, item.Database.Name, r.DailyKeep, r.WeeklyKeep, r.MonthlyKeep)
@@ -138,7 +138,7 @@ func runBackup(logger *slog.Logger, configPath string, args []string) error {
 	fs.SetOutput(os.Stderr)
 
 	serverName := fs.String("server", "", "Limit to one configured server")
-	databaseName := fs.String("database", "", "Limit to one configured database")
+	targetName := fs.String("target", "", "Limit to one configured target")
 	dryRun := fs.Bool("dry-run", false, "Print planned actions without creating backups or deleting old backups")
 
 	if err := fs.Parse(args); err != nil {
@@ -152,7 +152,7 @@ func runBackup(logger *slog.Logger, configPath string, args []string) error {
 	if err != nil {
 		return err
 	}
-	rows, runErr := executeBackup(logger, cfg, *serverName, *databaseName, *dryRun || cfg.Backup.DryRun)
+	rows, runErr := executeBackup(logger, cfg, *serverName, *targetName, *dryRun || cfg.Backup.DryRun)
 	printSummary(rows)
 	if runErr != nil {
 		var pathErr *os.PathError
@@ -164,27 +164,27 @@ func runBackup(logger *slog.Logger, configPath string, args []string) error {
 	return nil
 }
 
-func executeBackup(logger *slog.Logger, cfg *config.Config, serverName, databaseName string, dryRun bool) ([]backup.SummaryRow, error) {
-	return executeBackupWithProgress(logger, cfg, serverName, databaseName, dryRun, nil)
+func executeBackup(logger *slog.Logger, cfg *config.Config, serverName, targetName string, dryRun bool) ([]backup.SummaryRow, error) {
+	return executeBackupWithProgress(logger, cfg, serverName, targetName, dryRun, nil)
 }
 
-func executeBackupWithProgress(logger *slog.Logger, cfg *config.Config, serverName, databaseName string, dryRun bool, progress func(backup.SummaryRow)) ([]backup.SummaryRow, error) {
+func executeBackupWithProgress(logger *slog.Logger, cfg *config.Config, serverName, targetName string, dryRun bool, progress func(backup.SummaryRow)) ([]backup.SummaryRow, error) {
 	runner := &backup.Runner{
 		Config:   cfg,
 		Logger:   logger,
 		Progress: progress,
 	}
-	return runner.Run(context.Background(), serverName, databaseName, dryRun)
+	return runner.Run(context.Background(), serverName, targetName, dryRun)
 }
 
 func printRootUsage() {
-	fmt.Fprintf(os.Stdout, "pgdrivebackup backs up PostgreSQL databases to local storage.\n\n")
+	fmt.Fprintf(os.Stdout, "babalu-vault backs up configured targets to local storage.\n\n")
 	fmt.Fprintf(os.Stdout, "Usage:\n")
-	fmt.Fprintf(os.Stdout, "  pgdrivebackup [--config PATH] [command] [flags]\n\n")
+	fmt.Fprintf(os.Stdout, "  babalu-vault [--config PATH] [command] [flags]\n\n")
 	fmt.Fprintf(os.Stdout, "Commands:\n")
 	fmt.Fprintf(os.Stdout, "  ui         Launch the continuous terminal UI (default)\n")
-	fmt.Fprintf(os.Stdout, "  list       List backup targets, including live-discovered databases\n")
-	fmt.Fprintf(os.Stdout, "  backup     Back up configured databases to local storage\n")
+	fmt.Fprintf(os.Stdout, "  list       List backup targets, including live-discovered targets\n")
+	fmt.Fprintf(os.Stdout, "  backup     Back up configured targets to local storage\n")
 	fmt.Fprintf(os.Stdout, "  version    Print version\n")
 	fmt.Fprintf(os.Stdout, "\nGlobal flags:\n")
 	fmt.Fprintf(os.Stdout, "  --config PATH  Use a specific config file\n")
@@ -196,7 +196,7 @@ func printSummary(rows []backup.SummaryRow) {
 		return
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "SERVER\tDATABASE\tMETHOD\tSTATUS\tSIZE\tDURATION\tDETAIL")
+	fmt.Fprintln(w, "SERVER\tTARGET\tMETHOD\tSTATUS\tSIZE\tDURATION\tDETAIL")
 	for _, row := range rows {
 		detail := strings.Join(row.StoredPaths, ", ")
 		if row.Error != "" {

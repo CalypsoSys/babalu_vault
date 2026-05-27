@@ -20,8 +20,8 @@ postgres-dev/
   .env.example
   README.md
 
-pgdrivebackup/
-  cmd/pgdrivebackup/main.go
+babalu-vault/
+  cmd/babalu-vault/main.go
   internal/config/
   internal/backup/
   internal/drive/
@@ -64,9 +64,9 @@ Dockerized apps on the same Docker network should be able to connect using the D
 
 Do not store real secrets in the repo.
 
-## Part 2: Go app — pgdrivebackup
+## Part 2: Go app — babalu-vault
 
-Build a production-quality Go command-line app named `pgdrivebackup`.
+Build a production-quality Go command-line app named `babalu-vault`.
 
 The app backs up Postgres databases and uploads compressed backup files to Google Drive.
 
@@ -247,7 +247,7 @@ backup:
   dry_run: false
   optional_encryption:
     enabled: false
-    passphrase_env: "PGDRIVEBACKUP_ENCRYPTION_PASSWORD"
+    passphrase_env: "BABALU_VAULT_ENCRYPTION_PASSWORD"
 
 retention:
   daily_keep: 14
@@ -291,14 +291,14 @@ databases:
 Implement these commands:
 
 ```bash
-pgdrivebackup auth --config configs/example.yaml
-pgdrivebackup backup --config configs/example.yaml
-pgdrivebackup backup --config configs/example.yaml --server localdev
-pgdrivebackup backup --config configs/example.yaml --server localdev --database ommadb_dev
-pgdrivebackup backup --config configs/example.yaml --dry-run
-pgdrivebackup list --config configs/example.yaml
-pgdrivebackup retention --config configs/example.yaml --dry-run
-pgdrivebackup version
+babalu-vault auth --config configs/example.yaml
+babalu-vault backup --config configs/example.yaml
+babalu-vault backup --config configs/example.yaml --server localdev
+babalu-vault backup --config configs/example.yaml --server localdev --target ommadb_dev
+babalu-vault backup --config configs/example.yaml --dry-run
+babalu-vault list --config configs/example.yaml
+babalu-vault retention --config configs/example.yaml --dry-run
+babalu-vault version
 ```
 
 Use a Go CLI library if useful, but keep dependencies reasonable.
@@ -374,13 +374,13 @@ Document Windows Task Scheduler setup.
 Example command:
 
 ```powershell
-C:\path\to\pgdrivebackup.exe backup --config C:\path\to\configs\local.yaml
+C:\path\to\babalu-vault.exe backup --config C:\path\to\configs\local.yaml
 ```
 
 Also document Linux cron example:
 
 ```cron
-0 2 * * * /usr/local/bin/pgdrivebackup backup --config /etc/pgdrivebackup/config.yaml
+0 2 * * * /usr/local/bin/babalu-vault backup --config /etc/babalu-vault/config.yaml
 ```
 
 And a systemd service/timer example.

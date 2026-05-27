@@ -3,12 +3,12 @@
 This repository contains:
 
 - `postgres-dev/`: a shared local PostgreSQL 18 Docker Compose setup intended for Windows, WSL, and Docker Desktop workflows.
-- `pgdrivebackup`: a Go command-line utility that backs up one or more PostgreSQL databases to local storage and applies rotating retention rules.
+- `babalu-vault`: a Go command-line utility that backs up one or more PostgreSQL database targets to local storage and applies rotating retention rules.
 - `codex-slack-notify`: a Go helper that posts Codex completion or attention alerts to a Slack incoming webhook.
 
 ## PostgreSQL Client Tools
 
-`pgdrivebackup` uses the local PostgreSQL client tools when you configure a server with `type: tcp`. In practice, that means `pg_dump` must be installed and available on `PATH`.
+`babalu-vault` uses the local PostgreSQL client tools when you configure a server with `type: tcp`. In practice, that means `pg_dump` must be installed and available on `PATH`.
 
 Common installation options:
 
@@ -27,7 +27,7 @@ If you use only `type: docker` or `type: ssh`, local PostgreSQL client tools are
 Start with:
 
 1. Read `postgres-dev/README.md`.
-2. Read [README-pgdrivebackup.md](README-pgdrivebackup.md).
+2. Read [README-babalu-vault.md](README-babalu-vault.md).
 3. Read [README-codex-slack-notify.md](README-codex-slack-notify.md) if you want Slack alerts for Codex.
 
 ## Make Targets
@@ -42,16 +42,16 @@ make dry-run
 make gitleaks
 ```
 
-`make build` writes binaries to `./bin/pgdrivebackup`, `./bin/codex-slack-notify`, and `./bin/codex-slack-notify.exe`.
+`make build` writes binaries to `./bin/babalu-vault`, `./bin/codex-slack-notify`, and `./bin/codex-slack-notify.exe`.
 
 ## Secret Scanning
 
 This repo includes a baseline `gitleaks` setup:
 
 - Local scan: `make gitleaks`
-- Config: [`.gitleaks.toml`](/home/joe/code/calypso_pgvault/.gitleaks.toml)
-- Pre-commit hook: [`.pre-commit-config.yaml`](/home/joe/code/calypso_pgvault/.pre-commit-config.yaml)
-- CI workflow: [`.github/workflows/gitleaks.yml`](/home/joe/code/calypso_pgvault/.github/workflows/gitleaks.yml)
+- Config: [`.gitleaks.toml`](.gitleaks.toml)
+- Pre-commit hook: [`.pre-commit-config.yaml`](.pre-commit-config.yaml)
+- CI workflow: [`.github/workflows/gitleaks.yml`](.github/workflows/gitleaks.yml)
 
 The local target expects the `gitleaks` CLI to already be installed and scans git history with redacted output.
 
@@ -65,4 +65,4 @@ The hook uses the official `gitleaks` pre-commit integration and runs on staged 
 
 ## License
 
-This project is licensed under the MIT License. See [LICENSE](/home/joe/code/calypso_pgvault/LICENSE).
+This project is licensed under the MIT License. See [LICENSE](LICENSE).

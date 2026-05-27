@@ -13,7 +13,7 @@ func TestLoadResolvesPathsAndDefaults(t *testing.T) {
 backup:
   temp_dir: "./tmp"
   root_dir: "./backups"
-  log_path: "./logs/pgdrivebackup.log"
+  log_path: "./logs/babalu-vault.log"
   time_of_day: "03:15"
   state_path: "./state/scheduler.json"
 retention:
@@ -48,7 +48,7 @@ servers:
 	if cfg.Backup.TimeOfDay != "03:15" {
 		t.Fatalf("unexpected time of day %q", cfg.Backup.TimeOfDay)
 	}
-	if cfg.Backup.LogPath != filepath.Join(dir, "logs", "pgdrivebackup.log") {
+	if cfg.Backup.LogPath != filepath.Join(dir, "logs", "babalu-vault.log") {
 		t.Fatalf("unexpected log path %q", cfg.Backup.LogPath)
 	}
 	if cfg.Backup.StatePath != filepath.Join(dir, "state", "scheduler.json") {

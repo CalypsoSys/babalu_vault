@@ -12,12 +12,12 @@ Keep new Go code inside `internal/...` unless it is part of the CLI surface. Kee
 ## Build, Test, and Development Commands
 
 - `go test ./...`: run all Go unit tests.
-- `go build ./cmd/pgdrivebackup`: build the backup CLI locally.
-- `go run ./cmd/pgdrivebackup list --config configs/example.yaml`: verify config parsing and command wiring.
+- `go build ./cmd/babalu-vault`: build the backup CLI locally.
+- `go run ./cmd/babalu-vault list --config configs/example.yaml`: verify config parsing and command wiring.
 - `cd postgres-dev && docker compose up -d`: start the local PostgreSQL container.
 - `cd postgres-dev && docker compose down`: stop the local database.
 
-Use `go run ./cmd/pgdrivebackup backup --config configs/example.yaml --dry-run` before testing real uploads or retention behavior.
+Use `go run ./cmd/babalu-vault backup --config configs/example.yaml --dry-run` before testing real uploads or retention behavior.
 
 ## Coding Style & Naming Conventions
 
@@ -35,7 +35,7 @@ This branch has no commit history yet, so use a simple imperative commit style s
 
 ## Security & Configuration Tips
 
-Do not commit real `.env` files, OAuth credentials, refresh tokens, or database passwords. Keep secrets in environment variables such as `LOCALDEV_POSTGRES_PASSWORD` and `PGDRIVEBACKUP_ENCRYPTION_PASSWORD`.
+Do not commit real `.env` files, OAuth credentials, refresh tokens, or database passwords. Keep secrets in environment variables such as `LOCALDEV_POSTGRES_PASSWORD` and `BABALU_VAULT_ENCRYPTION_PASSWORD`.
 Do not commit PII, secrets, passwords, tokens, or machine-specific settings.
 Make sure code follows security best practices for handling sensitive data, including avoiding unsafe storage or logging of PII, passwords, secrets, and related credentials.
 

@@ -1,11 +1,11 @@
 backup:
   temp_dir: "./tmp"
   root_dir: "./backups"
-  log_path: "./logs/pgdrivebackup.log"
+  log_path: "./logs/babalu-vault.log"
   gzip_level: 6
   dry_run: false
   time_of_day: "02:00"
-  state_path: "./state/pgdrivebackup-scheduler.json"
+  state_path: "./state/babalu-vault-scheduler.json"
 
 retention:
   daily_keep: 4

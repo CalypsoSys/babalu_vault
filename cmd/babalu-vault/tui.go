@@ -138,7 +138,7 @@ func newModel(configPath string, cfg *config.Config, dryRun bool, logger *slog.L
 		targetsVP:     targetsVP,
 		activityVP:    activityVP,
 	}
-	m.recordEvent("info", fmt.Sprintf("loaded %d database targets from %s", len(statuses), configPath))
+	m.recordEvent("info", fmt.Sprintf("loaded %d targets from %s", len(statuses), configPath))
 	m.recordEvent("info", fmt.Sprintf("scheduler armed for daily run at %02d:%02d", hour, minute))
 	if stateErr != nil {
 		m.recordEvent("warn", fmt.Sprintf("scheduler state unavailable: %v", stateErr))
@@ -702,7 +702,7 @@ func renderHeaderCard(m model, palette styles) string {
 	}
 	identity := lipgloss.JoinHorizontal(
 		lipgloss.Center,
-		palette.title.Render("pgdrivebackup"),
+		palette.title.Render("babalu-vault"),
 		"  ",
 		palette.muted.Render(clock.Local().Format("Monday, Jan 02 2006")),
 		"  ",
@@ -830,7 +830,7 @@ func renderStatusesContent(m model) (string, int) {
 	}
 
 	if len(lines) == 0 {
-		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("246")).Render("No configured databases"))
+		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("246")).Render("No configured targets"))
 	}
 	return strings.Join(lines, "\n"), selectedLine
 }

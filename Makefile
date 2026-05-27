@@ -1,4 +1,4 @@
-APP_NAME := pgdrivebackup
+APP_NAME := babalu-vault
 BIN_DIR := bin
 BIN_PATH := $(BIN_DIR)/$(APP_NAME)
 SLACK_NOTIFY_NAME := codex-slack-notify
@@ -7,11 +7,11 @@ SLACK_NOTIFY_WINDOWS_PATH := $(BIN_DIR)/$(SLACK_NOTIFY_NAME).exe
 CACHE_DIR := .cache
 GO_ENV := GOCACHE=$(abspath $(CACHE_DIR)/go-build) GOMODCACHE=$(abspath $(CACHE_DIR)/go-mod)
 
-.PHONY: build build-pgdrivebackup build-slack-notify build-slack-notify-windows test run dry-run gitleaks clean
+.PHONY: build build-babalu-vault build-slack-notify build-slack-notify-windows test run dry-run gitleaks clean
 
-build: build-pgdrivebackup build-slack-notify build-slack-notify-windows
+build: build-babalu-vault build-slack-notify build-slack-notify-windows
 
-build-pgdrivebackup:
+build-babalu-vault:
 	mkdir -p $(BIN_DIR)
 	mkdir -p $(CACHE_DIR)/go-build $(CACHE_DIR)/go-mod
 	$(GO_ENV) go build -o $(BIN_PATH) ./cmd/$(APP_NAME)

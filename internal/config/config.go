@@ -84,13 +84,13 @@ func (c *Config) applyDefaults(baseDir string) {
 		c.Backup.TempDir = "./tmp"
 	}
 	if c.Backup.LogPath == "" {
-		c.Backup.LogPath = "./logs/pgdrivebackup.log"
+		c.Backup.LogPath = "./logs/babalu-vault.log"
 	}
 	if c.Backup.TimeOfDay == "" {
 		c.Backup.TimeOfDay = "02:00"
 	}
 	if c.Backup.StatePath == "" {
-		c.Backup.StatePath = "./state/pgdrivebackup-scheduler.json"
+		c.Backup.StatePath = "./state/babalu-vault-scheduler.json"
 	}
 	if c.Retention.DailyKeep == 0 {
 		c.Retention.DailyKeep = 14
