@@ -68,11 +68,23 @@ type DiscoveryConfig struct {
 }
 
 type TargetConfig struct {
-	Name      string           `yaml:"name"`
-	Database  string           `yaml:"database"`
-	Path      string           `yaml:"path"`
-	Excludes  []string         `yaml:"excludes"`
-	Retention *RetentionPolicy `yaml:"retention"`
+	Name         string             `yaml:"name"`
+	Database     string             `yaml:"database"`
+	Path         string             `yaml:"path"`
+	Excludes     []string           `yaml:"excludes"`
+	SanityChecks SanityChecksConfig `yaml:"sanity_checks"`
+	Retention    *RetentionPolicy   `yaml:"retention"`
+}
+
+type SanityChecksConfig struct {
+	Enabled     bool                  `yaml:"enabled"`
+	ScanRotated bool                  `yaml:"scan_rotated"`
+	Patterns    []SanityPatternConfig `yaml:"patterns"`
+}
+
+type SanityPatternConfig struct {
+	Name  string `yaml:"name"`
+	Match string `yaml:"match"`
 }
 
 type SelectedTarget struct {
@@ -312,6 +324,31 @@ func validateFileBackup(server ServerConfig, backup BackupConfig) error {
 			if strings.TrimSpace(pattern) == "" {
 				return fmt.Errorf("backup %q target %q excludes entries must be non-empty", backup.Name, target.Name)
 			}
+		}
+		if err := validateSanityChecks(backup.Name, target.Name, target.SanityChecks); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateSanityChecks(backupName, targetName string, checks SanityChecksConfig) error {
+	if !checks.Enabled {
+		return nil
+	}
+	if len(checks.Patterns) == 0 {
+		return fmt.Errorf("backup %q target %q sanity_checks.patterns must have at least one entry when enabled", backupName, targetName)
+	}
+	for _, pattern := range checks.Patterns {
+		if strings.TrimSpace(pattern.Name) == "" {
+			return fmt.Errorf("backup %q target %q sanity_checks.patterns.name entries must be non-empty", backupName, targetName)
+		}
+		match := strings.TrimSpace(pattern.Match)
+		if match == "" {
+			return fmt.Errorf("backup %q target %q sanity_checks.patterns.match entries must be non-empty", backupName, targetName)
+		}
+		if _, err := regexp.Compile("(?i)" + match); err != nil {
+			return fmt.Errorf("backup %q target %q sanity_checks pattern %q is not a valid regular expression: %w", backupName, targetName, pattern.Name, err)
 		}
 	}
 	return nil

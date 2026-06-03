@@ -136,6 +136,13 @@ func (r *Runner) runOne(ctx context.Context, item config.SelectedTarget, dryRun 
 	localPath := filepath.Join(r.Config.Settings.TempDir, filename)
 	row.LocalFile = localPath
 	row.StoredPaths = []string{filepath.Join(r.Config.Settings.RootDir, groupName, targetName, filename)}
+	reportFilename := ""
+	reportLocalPath := ""
+	if sanityChecksEnabled(item) {
+		reportFilename = BuildFilename(retention.TierDaily, groupName, targetName, start, sanityReportExtension)
+		reportLocalPath = filepath.Join(r.Config.Settings.TempDir, reportFilename)
+		row.StoredPaths = append(row.StoredPaths, filepath.Join(r.Config.Settings.RootDir, groupName, targetName, reportFilename))
+	}
 	r.emitProgress(SummaryRow{
 		Server:      row.Server,
 		Backup:      row.Backup,
@@ -163,6 +170,10 @@ func (r *Runner) runOne(ctx context.Context, item config.SelectedTarget, dryRun 
 		logOperation("warn", "dry-run command preview", slog.String("command", preview))
 		logOperation("info", "dry-run would create temp backup file", slog.String("local_file", localPath))
 		logOperation("info", "dry-run would store daily backup", slog.String("path", row.StoredPaths[0]))
+		if sanityChecksEnabled(item) {
+			logOperation("info", "dry-run would create sanity report", slog.String("local_file", reportLocalPath))
+			logOperation("info", "dry-run would store daily sanity report", slog.String("path", row.StoredPaths[1]))
+		}
 		if err := r.logRetentionPlan(item, start, logOperation); err != nil {
 			row.Status = "error"
 			row.Error = sanitizeSensitiveString(err.Error())
@@ -199,7 +210,33 @@ func (r *Runner) runOne(ctx context.Context, item config.SelectedTarget, dryRun 
 	row.SizeBytes = info.Size()
 	logOperation("info", "temp backup file created", slog.Int64("size_bytes", row.SizeBytes), slog.String("local_file", localPath))
 
-	if err := r.storeAndRetain(item, localPath, filename, start, logOperation); err != nil {
+	if sanityChecksEnabled(item) {
+		report, err := buildSanityReportFromArchive(item, localPath, row.SizeBytes, start)
+		if err != nil {
+			row.Status = "error"
+			row.Error = sanitizeSensitiveString(err.Error())
+			row.Duration = time.Since(start)
+			row.Operations = operations
+			logOperation("error", "sanity report failed", slog.Any("error", err))
+			return row
+		}
+		if err := writeSanityReport(reportLocalPath, report); err != nil {
+			row.Status = "error"
+			row.Error = sanitizeSensitiveString(err.Error())
+			row.Duration = time.Since(start)
+			row.Operations = operations
+			logOperation("error", "sanity report failed", slog.Any("error", err))
+			return row
+		}
+		defer os.Remove(reportLocalPath)
+		logOperation("info", "sanity report created",
+			slog.String("local_file", reportLocalPath),
+			slog.Int("matched_lines", report.TotalMatchedLines),
+			slog.Int("scanned_files", report.ScannedFileCount),
+		)
+	}
+
+	if err := r.storeAndRetain(item, localPath, filename, reportLocalPath, reportFilename, start, logOperation); err != nil {
 		row.Status = "error"
 		row.Error = sanitizeSensitiveString(err.Error())
 		row.Duration = time.Since(start)
@@ -888,6 +925,10 @@ func artifactExtension(item config.SelectedTarget) string {
 	}
 }
 
+func sanityChecksEnabled(item config.SelectedTarget) bool {
+	return item.Backup.Engine == "files" && item.Target.SanityChecks.Enabled
+}
+
 func shellQuote(value string) string {
 	if value == "" {
 		return "''"
@@ -1062,7 +1103,7 @@ func sanitizeSensitiveString(value string) string {
 	return safe
 }
 
-func (r *Runner) storeAndRetain(item config.SelectedTarget, localPath, filename string, now time.Time, logOperation func(string, string, ...slog.Attr)) error {
+func (r *Runner) storeAndRetain(item config.SelectedTarget, localPath, filename, reportPath, reportFilename string, now time.Time, logOperation func(string, string, ...slog.Attr)) error {
 	groupName := item.Backup.Name
 	targetName := item.Target.Name
 	dailyPath := filepath.Join(r.Config.Settings.RootDir, groupName, targetName, filename)
@@ -1071,6 +1112,15 @@ func (r *Runner) storeAndRetain(item config.SelectedTarget, localPath, filename 
 		return fmt.Errorf("store daily backup: %w", err)
 	}
 	logOperation("info", "daily backup stored", slog.String("path", dailyPath))
+
+	if reportPath != "" {
+		reportDailyPath := filepath.Join(r.Config.Settings.RootDir, groupName, targetName, reportFilename)
+		logOperation("info", "storing daily sanity report", slog.String("source", reportPath), slog.String("destination", reportDailyPath))
+		if err := copyFile(reportPath, reportDailyPath); err != nil {
+			return fmt.Errorf("store daily sanity report: %w", err)
+		}
+		logOperation("info", "daily sanity report stored", slog.String("path", reportDailyPath))
+	}
 
 	planner := &retention.Planner{
 		RootDir:   r.Config.Settings.RootDir,
@@ -1090,6 +1140,27 @@ func (r *Runner) storeAndRetain(item config.SelectedTarget, localPath, filename 
 	}
 	for _, deletion := range planner.DeleteLog {
 		logOperation("info", "retention deletion", slog.String("tier", string(deletion.Tier)), slog.String("file", deletion.File.Name))
+	}
+	if reportPath != "" {
+		reportPlanner := &retention.Planner{
+			RootDir:   r.Config.Settings.RootDir,
+			DryRun:    false,
+			Extension: sanityReportExtension,
+		}
+		logOperation("info", "applying sanity report retention policy", slog.Int("daily_keep", item.Retention.DailyKeep), slog.Int("weekly_keep", item.Retention.WeeklyKeep), slog.Int("monthly_keep", item.Retention.MonthlyKeep))
+		if err := reportPlanner.ApplyAt(groupName, targetName, item.Retention, now); err != nil {
+			return err
+		}
+		for _, promotion := range reportPlanner.PromoteLog {
+			logOperation("info", "sanity report retention promotion",
+				slog.String("from_tier", string(promotion.From)),
+				slog.String("to_tier", string(promotion.To)),
+				slog.String("file", promotion.File.Name),
+			)
+		}
+		for _, deletion := range reportPlanner.DeleteLog {
+			logOperation("info", "sanity report retention deletion", slog.String("tier", string(deletion.Tier)), slog.String("file", deletion.File.Name))
+		}
 	}
 	return nil
 }
@@ -1113,6 +1184,26 @@ func (r *Runner) logRetentionPlan(item config.SelectedTarget, now time.Time, log
 	}
 	for _, deletion := range planner.DeleteLog {
 		logOperation("info", "dry-run would delete backup", slog.String("tier", string(deletion.Tier)), slog.String("file", deletion.File.Name))
+	}
+	if sanityChecksEnabled(item) {
+		reportPlanner := &retention.Planner{
+			RootDir:   r.Config.Settings.RootDir,
+			DryRun:    true,
+			Extension: sanityReportExtension,
+		}
+		if err := reportPlanner.ApplyAt(item.Backup.Name, item.Target.Name, item.Retention, now); err != nil {
+			return err
+		}
+		for _, promotion := range reportPlanner.PromoteLog {
+			logOperation("info", "dry-run would promote sanity report",
+				slog.String("from_tier", string(promotion.From)),
+				slog.String("to_tier", string(promotion.To)),
+				slog.String("file", promotion.File.Name),
+			)
+		}
+		for _, deletion := range reportPlanner.DeleteLog {
+			logOperation("info", "dry-run would delete sanity report", slog.String("tier", string(deletion.Tier)), slog.String("file", deletion.File.Name))
+		}
 	}
 	return nil
 }

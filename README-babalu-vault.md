@@ -9,6 +9,7 @@ It supports:
 - Remote file-set backups over SSH using `tar`
 - Live PostgreSQL database discovery using `pg_database`
 - Gzipped SQL archives for database targets and gzipped tar archives for file targets
+- Optional plain-text sanity reports for file targets such as `/srv/logs`
 - Global retention policy
 - Continuous TUI mode with a daily in-app scheduler
 - One-shot `list` and `backup` commands
@@ -142,6 +143,34 @@ backups:
           - "wp-content/debug.log"
 ```
 
+A remote `/srv/logs` backup with a daily sanity report:
+
+```yaml
+backups:
+  - name: "example-logs"
+    server: "homelab-wp-host"
+    engine: "files"
+    targets:
+      - name: "srv-logs"
+        path: "/srv/logs"
+        excludes:
+          - "**/*.tmp"
+        sanity_checks:
+          enabled: true
+          scan_rotated: false
+          patterns:
+            - name: "/.env"
+              match: '/\.env'
+            - name: "/api/.env"
+              match: '/api/\.env'
+            - name: "wp-login.php"
+              match: 'wp-login\.php'
+            - name: "500"
+              match: ' 500 '
+            - name: "permission denied"
+              match: 'permission denied'
+```
+
 Backups are stored under:
 
 ```text
@@ -158,9 +187,13 @@ monthly_<backup>_<target>_YYYY-MM-DD.sql.gz
 daily_<backup>_<target>_YYYY-MM-DD.tar.gz
 weekly_<backup>_<target>_YYYY-MM-DD.tar.gz
 monthly_<backup>_<target>_YYYY-MM-DD.tar.gz
+
+daily_<backup>_<target>_YYYY-MM-DD.report.txt
+weekly_<backup>_<target>_YYYY-MM-DD.report.txt
+monthly_<backup>_<target>_YYYY-MM-DD.report.txt
 ```
 
-Database targets use `.sql.gz`; file targets use `.tar.gz`.
+Database targets use `.sql.gz`; file targets use `.tar.gz`. File targets with `sanity_checks.enabled: true` also write `.report.txt` sidecars next to the archive.
 
 ## Commands
 
@@ -310,6 +343,19 @@ ssh backup@example-host tar --numeric-owner --one-file-system -C /path/to/source
 
 SSH is run in non-interactive mode for scheduler safety. The remote host key must already be trusted in your local `known_hosts` file, or the backup will fail fast instead of prompting inside the TUI.
 
+### File Sanity Reports
+
+For `files` targets, optional `sanity_checks` generate a plain-text daily report from the completed local `.tar.gz` archive. This keeps the file archive behavior unchanged while adding a sidecar such as:
+
+```text
+daily_example-logs_srv-logs_2026-06-03.tar.gz
+daily_example-logs_srv-logs_2026-06-03.report.txt
+```
+
+Patterns are Go regular expressions and are matched case-insensitively. Reports include the server, backup, target, source path, date, archived file count, archive size, scanned and skipped log counts, per-pattern counts, total matched lines, and top source IPs from matched lines that look like HTTP access logs.
+
+By default, `scan_rotated: false` skips rotated or compressed artifacts during report scanning, including `*.gz`, `*.zip`, `*.tar`, `*.tar.gz`, `*.tgz`, `*.bz2`, `*.xz`, numbered rotations like `*.1`, and dated rotations like `*.2026-06-03`. This does not change what `tar` archives; it only limits what the sanity report inspects. Set `scan_rotated: true` only when you intentionally want older artifacts included in the report scan.
+
 ## Retention
 
 Default global retention:
@@ -334,6 +380,7 @@ Cleanup is intentionally conservative:
 
 - Only files whose names match this app's managed filename pattern are eligible for deletion.
 - Only files inside the configured local backup folders are considered.
+- Sanity report sidecars use the same retention policy as their file archive target, but report retention and archive retention are counted separately.
 - In dry-run mode, deletions are logged but not executed.
 
 ## Restore

@@ -121,6 +121,48 @@ func TestPlannerPreservesTypedExtensionWhenPromotingSnapshots(t *testing.T) {
 	}
 }
 
+func TestPlannerAppliesReportRetentionSeparatelyFromArchives(t *testing.T) {
+	root := t.TempDir()
+	baseDir := filepath.Join(root, "hasimojoe-logs", "srv-logs")
+	if err := os.MkdirAll(baseDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range []string{
+		"daily_hasimojoe-logs_srv-logs_2026-06-01.tar.gz",
+		"daily_hasimojoe-logs_srv-logs_2026-06-02.tar.gz",
+		"daily_hasimojoe-logs_srv-logs_2026-06-01.report.txt",
+		"daily_hasimojoe-logs_srv-logs_2026-06-02.report.txt",
+	} {
+		if err := os.WriteFile(filepath.Join(baseDir, name), []byte(name), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	now := time.Date(2026, 6, 3, 2, 0, 0, 0, time.UTC)
+	archivePlanner := &Planner{RootDir: root, Extension: ".tar.gz"}
+	if err := archivePlanner.ApplyAt("hasimojoe-logs", "srv-logs", config.RetentionPolicy{DailyKeep: 1, WeeklyKeep: 0, MonthlyKeep: 0}, now); err != nil {
+		t.Fatalf("archive ApplyAt() error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(baseDir, "daily_hasimojoe-logs_srv-logs_2026-06-01.tar.gz")); !os.IsNotExist(err) {
+		t.Fatalf("expected old archive to be pruned, stat error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(baseDir, "daily_hasimojoe-logs_srv-logs_2026-06-01.report.txt")); err != nil {
+		t.Fatalf("expected archive retention to leave report file, stat error = %v", err)
+	}
+
+	reportPlanner := &Planner{RootDir: root, Extension: ".report.txt"}
+	if err := reportPlanner.ApplyAt("hasimojoe-logs", "srv-logs", config.RetentionPolicy{DailyKeep: 1, WeeklyKeep: 0, MonthlyKeep: 0}, now); err != nil {
+		t.Fatalf("report ApplyAt() error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(baseDir, "daily_hasimojoe-logs_srv-logs_2026-06-01.report.txt")); !os.IsNotExist(err) {
+		t.Fatalf("expected old report to be pruned, stat error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(baseDir, "daily_hasimojoe-logs_srv-logs_2026-06-02.tar.gz")); err != nil {
+		t.Fatalf("expected report retention to leave archive file, stat error = %v", err)
+	}
+}
+
 func TestPlannerCreatesMonthlySnapshotForPreviousMonth(t *testing.T) {
 	root := t.TempDir()
 	baseDir := filepath.Join(root, "local", "db")

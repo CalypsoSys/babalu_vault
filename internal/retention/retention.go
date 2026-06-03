@@ -50,7 +50,7 @@ type LocalFile struct {
 	Name string
 }
 
-var managedFilenamePattern = regexp.MustCompile(`^(daily|weekly|monthly)_.+_.+_\d{4}-\d{2}-\d{2}(\.sql|\.tar)?\.gz$`)
+var managedFilenamePattern = regexp.MustCompile(`^(daily|weekly|monthly)_.+_.+_\d{4}-\d{2}-\d{2}((\.sql|\.tar)?\.gz|\.report\.txt)$`)
 
 func SelectExcess(files []LocalFile, keep int, tier Tier, serverName, databaseName string) []LocalFile {
 	if keep < 0 {
@@ -106,14 +106,17 @@ func (p *Planner) ApplyAt(serverName, databaseName string, policy config.Retenti
 	if err != nil {
 		return fmt.Errorf("list daily files: %w", err)
 	}
+	dailyFiles = filterLocalFilesByExtension(dailyFiles, p.extension())
 	weeklyFiles, err := ListLocalFiles(baseDir)
 	if err != nil {
 		return fmt.Errorf("list weekly files: %w", err)
 	}
+	weeklyFiles = filterLocalFilesByExtension(weeklyFiles, p.extension())
 	monthlyFiles, err := ListLocalFiles(baseDir)
 	if err != nil {
 		return fmt.Errorf("list monthly files: %w", err)
 	}
+	monthlyFiles = filterLocalFilesByExtension(monthlyFiles, p.extension())
 
 	if policy.WeeklyKeep > 0 {
 		if err := p.ensurePeriodSnapshots(dailyFiles, &weeklyFiles, serverName, databaseName, now, TierDaily, TierWeekly, baseDir); err != nil {
@@ -136,14 +139,17 @@ func (p *Planner) ApplyAt(serverName, databaseName string, policy config.Retenti
 	if err != nil {
 		return fmt.Errorf("relist daily files: %w", err)
 	}
+	dailyFiles = filterLocalFilesByExtension(dailyFiles, p.extension())
 	weeklyFiles, err = ListLocalFiles(baseDir)
 	if err != nil {
 		return fmt.Errorf("relist weekly files: %w", err)
 	}
+	weeklyFiles = filterLocalFilesByExtension(weeklyFiles, p.extension())
 	monthlyFiles, err = ListLocalFiles(baseDir)
 	if err != nil {
 		return fmt.Errorf("relist monthly files: %w", err)
 	}
+	monthlyFiles = filterLocalFilesByExtension(monthlyFiles, p.extension())
 
 	for _, item := range []struct {
 		tier  Tier
@@ -184,6 +190,16 @@ func ListLocalFiles(dir string) ([]LocalFile, error) {
 		})
 	}
 	return files, nil
+}
+
+func filterLocalFilesByExtension(files []LocalFile, extension string) []LocalFile {
+	filtered := make([]LocalFile, 0, len(files))
+	for _, file := range files {
+		if strings.HasSuffix(file.Name, extension) {
+			filtered = append(filtered, file)
+		}
+	}
+	return filtered
 }
 
 func (p *Planner) ensurePeriodSnapshots(sourceFiles []LocalFile, destFiles *[]LocalFile, serverName, databaseName string, now time.Time, fromTier, toTier Tier, destDir string) error {
@@ -381,7 +397,7 @@ func (p *Planner) extension() string {
 }
 
 func trimManagedExtension(value string) string {
-	for _, extension := range []string{".sql.gz", ".tar.gz", ".gz"} {
+	for _, extension := range []string{".report.txt", ".sql.gz", ".tar.gz", ".gz"} {
 		if strings.HasSuffix(value, extension) {
 			return strings.TrimSuffix(value, extension)
 		}

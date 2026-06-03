@@ -9,7 +9,7 @@ import (
 	"github.com/CalypsoSys/babalu_vault/internal/retention"
 )
 
-var managedFilenamePattern = regexp.MustCompile(`^(daily|weekly|monthly)_.+_.+_\d{4}-\d{2}-\d{2}(\.sql|\.tar)?\.gz$`)
+var managedFilenamePattern = regexp.MustCompile(`^(daily|weekly|monthly)_.+_.+_\d{4}-\d{2}-\d{2}((\.sql|\.tar)?\.gz|\.report\.txt)$`)
 
 func BuildFilename(tier retention.Tier, groupName, targetName string, ts time.Time, extensions ...string) string {
 	extension := ".gz"
@@ -37,7 +37,7 @@ func ParseManagedTimestamp(filename, groupName, targetName string) (time.Time, b
 }
 
 func trimManagedExtension(value string) string {
-	for _, extension := range []string{".sql.gz", ".tar.gz", ".gz"} {
+	for _, extension := range []string{".report.txt", ".sql.gz", ".tar.gz", ".gz"} {
 		if strings.HasSuffix(value, extension) {
 			return strings.TrimSuffix(value, extension)
 		}

@@ -75,3 +75,58 @@ backups:
         excludes:
           - "wp-content/cache/**"
           - "wp-content/debug.log"
+
+  - name: "example-logs"
+    server: "homelab-wp-host"
+    engine: "files"
+    targets:
+      - name: "srv-logs"
+        path: "/srv/logs"
+        excludes:
+          - "**/*.tmp"
+        sanity_checks:
+          enabled: true
+          scan_rotated: false
+          patterns:
+            - name: "/.env"
+              match: '/\.env'
+            - name: "/.env.local"
+              match: '/\.env\.local'
+            - name: "/api/.env"
+              match: '/api/\.env'
+            - name: "service-account.json"
+              match: 'service-account\.json'
+            - name: "credentials.json"
+              match: 'credentials\.json'
+            - name: "client_secret.json"
+              match: 'client_secret\.json'
+            - name: ".git/config"
+              match: '\.git/config'
+            - name: "wp-login.php"
+              match: 'wp-login\.php'
+            - name: "xmlrpc.php"
+              match: 'xmlrpc\.php'
+            - name: "500"
+              match: ' 500 '
+            - name: "502"
+              match: ' 502 '
+            - name: "503"
+              match: ' 503 '
+            - name: "504"
+              match: ' 504 '
+            - name: "panic"
+              match: '\bpanic\b'
+            - name: "fatal"
+              match: '\bfatal\b'
+            - name: "unhandled exception"
+              match: 'unhandled exception'
+            - name: "permission denied"
+              match: 'permission denied'
+            - name: "too many connections"
+              match: 'too many connections'
+            - name: "database system was interrupted"
+              match: 'database system was interrupted'
+            - name: "out of disk"
+              match: 'out of disk'
+            - name: "No space left on device"
+              match: 'No space left on device'

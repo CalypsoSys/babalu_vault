@@ -175,6 +175,72 @@ func TestValidateRejectsFileBackupWithoutSSHServer(t *testing.T) {
 	}
 }
 
+func TestLoadParsesFileTargetSanityChecks(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	content := `
+settings:
+  root_dir: "./backups"
+servers:
+  - name: "hasimojoe"
+    type: "ssh"
+    ssh_target: "backup@hasimojoe"
+backups:
+  - name: "hasimojoe-logs"
+    server: "hasimojoe"
+    engine: "files"
+    targets:
+      - name: "srv-logs"
+        path: "/srv/logs"
+        excludes:
+          - "**/*.tmp"
+        sanity_checks:
+          enabled: true
+          scan_rotated: false
+          patterns:
+            - name: "/.env"
+              match: '/\.env'
+            - name: "http 5xx"
+              match: ' 5[0-9][0-9] '
+`
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	checks := cfg.Backups[0].Targets[0].SanityChecks
+	if !checks.Enabled {
+		t.Fatal("expected sanity checks to be enabled")
+	}
+	if checks.ScanRotated {
+		t.Fatal("expected scan_rotated to parse as false")
+	}
+	if len(checks.Patterns) != 2 {
+		t.Fatalf("expected 2 patterns, got %d", len(checks.Patterns))
+	}
+	if checks.Patterns[0].Name != "/.env" || checks.Patterns[0].Match != `/\.env` {
+		t.Fatalf("unexpected first sanity pattern %+v", checks.Patterns[0])
+	}
+}
+
+func TestValidateRejectsInvalidSanityCheckPattern(t *testing.T) {
+	cfg := validFileConfig()
+	cfg.Backups[0].Targets[0].SanityChecks = SanityChecksConfig{
+		Enabled: true,
+		Patterns: []SanityPatternConfig{
+			{Name: "broken", Match: "["},
+		},
+	}
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected invalid sanity check regex to fail validation")
+	}
+}
+
 func TestValidateRejectsMySQLDiscoveryForNow(t *testing.T) {
 	cfg := validConfig()
 	cfg.Backups[0].Engine = "mysql"
@@ -260,6 +326,26 @@ func validConfig() *Config {
 					Password: "${LOCALDEV_POSTGRES_PASSWORD}",
 				},
 				Targets: []TargetConfig{{Name: "db1", Database: "db1"}},
+			},
+		},
+	}
+}
+
+func validFileConfig() *Config {
+	return &Config{
+		Settings:  SettingsConfig{RootDir: "/tmp/backups", TimeOfDay: "02:00", GzipLevel: 6},
+		Retention: RetentionPolicy{DailyKeep: 4, WeeklyKeep: 1, MonthlyKeep: 1},
+		Servers: []ServerConfig{
+			{Name: "hasimojoe", Type: "ssh", SSHTarget: "backup@hasimojoe"},
+		},
+		Backups: []BackupConfig{
+			{
+				Name:   "hasimojoe-logs",
+				Server: "hasimojoe",
+				Engine: "files",
+				Targets: []TargetConfig{
+					{Name: "srv-logs", Path: "/srv/logs"},
+				},
 			},
 		},
 	}
