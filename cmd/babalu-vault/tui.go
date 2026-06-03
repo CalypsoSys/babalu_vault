@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -42,6 +43,7 @@ type databaseStatus struct {
 	LastSize    int64
 	LastError   string
 	LastPaths   []string
+	LastReport  *backup.SanityReportSummary
 	LastElapsed time.Duration
 }
 
@@ -61,36 +63,39 @@ type focusArea string
 
 const (
 	focusTargets  focusArea = "targets"
+	focusReports  focusArea = "reports"
 	focusActivity focusArea = "activity"
 )
 
 type model struct {
-	configPath    string
-	cfg           *config.Config
-	configModTime time.Time
-	configSize    int64
-	logger        *slog.Logger
-	dryRun        bool
-	scheduleHour  int
-	scheduleMin   int
-	now           time.Time
-	nextRun       time.Time
-	paused        bool
-	running       bool
-	currentAction string
-	lastRun       time.Time
-	lastError     string
-	width         int
-	height        int
-	statuses      []databaseStatus
-	selected      int
-	events        []eventEntry
-	showPalette   bool
-	showDetails   bool
-	focus         focusArea
-	targetsVP     viewport.Model
-	activityVP    viewport.Model
-	backupMsgs    chan tea.Msg
+	configPath          string
+	cfg                 *config.Config
+	configModTime       time.Time
+	configSize          int64
+	logger              *slog.Logger
+	dryRun              bool
+	scheduleHour        int
+	scheduleMin         int
+	now                 time.Time
+	nextRun             time.Time
+	paused              bool
+	running             bool
+	currentAction       string
+	lastRun             time.Time
+	lastError           string
+	width               int
+	height              int
+	statuses            []databaseStatus
+	selected            int
+	selectedReportIndex int
+	events              []eventEntry
+	showPalette         bool
+	showDetails         bool
+	focus               focusArea
+	targetsVP           viewport.Model
+	reportsVP           viewport.Model
+	activityVP          viewport.Model
+	backupMsgs          chan tea.Msg
 }
 
 func newModel(configPath string, cfg *config.Config, dryRun bool, logger *slog.Logger) model {
@@ -118,8 +123,10 @@ func newModel(configPath string, cfg *config.Config, dryRun bool, logger *slog.L
 	}
 
 	targetsVP := viewport.New(80, 12)
+	reportsVP := viewport.New(48, 12)
 	activityVP := viewport.New(80, 8)
 	targetsVP.MouseWheelEnabled = true
+	reportsVP.MouseWheelEnabled = true
 	activityVP.MouseWheelEnabled = true
 
 	m := model{
@@ -136,6 +143,7 @@ func newModel(configPath string, cfg *config.Config, dryRun bool, logger *slog.L
 		statuses:      statuses,
 		focus:         focusTargets,
 		targetsVP:     targetsVP,
+		reportsVP:     reportsVP,
 		activityVP:    activityVP,
 	}
 	m.recordEvent("info", fmt.Sprintf("loaded %d targets from %s", len(statuses), configPath))
@@ -255,6 +263,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showDetails = true
 				return m, nil
 			}
+			if m.focus == focusReports && m.selectedReport() != nil {
+				m.showDetails = true
+				return m, nil
+			}
 		case "tab":
 			m.toggleFocus()
 			m.syncViewports()
@@ -280,10 +292,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.syncViewports()
 				return m, nil
 			}
+			if m.focus == focusReports {
+				if m.selectedReportIndex > 0 {
+					m.selectedReportIndex--
+				}
+				m.syncViewports()
+				return m, nil
+			}
 		case "down", "j":
 			if m.focus == focusTargets {
 				if m.selected < len(m.statuses)-1 {
 					m.selected++
+				}
+				m.syncViewports()
+				return m, nil
+			}
+			if m.focus == focusReports {
+				if m.selectedReportIndex < len(m.reports())-1 {
+					m.selectedReportIndex++
 				}
 				m.syncViewports()
 				return m, nil
@@ -352,9 +378,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if m.focus == focusActivity {
+	switch m.focus {
+	case focusActivity:
 		m.activityVP, cmd = m.activityVP.Update(msg)
-	} else {
+	case focusReports:
+		m.reportsVP, cmd = m.reportsVP.Update(msg)
+	default:
 		m.targetsVP, cmd = m.targetsVP.Update(msg)
 	}
 	return m, cmd
@@ -408,11 +437,14 @@ func (m *model) togglePause() {
 }
 
 func (m *model) toggleFocus() {
-	if m.focus == focusTargets {
+	switch m.focus {
+	case focusTargets:
+		m.focus = focusReports
+	case focusReports:
 		m.focus = focusActivity
-		return
+	default:
+		m.focus = focusTargets
 	}
-	m.focus = focusTargets
 }
 
 func (m *model) updateStatus(row backup.SummaryRow, at time.Time) {
@@ -423,6 +455,7 @@ func (m *model) updateStatus(row backup.SummaryRow, at time.Time) {
 			m.statuses[i].LastSize = row.SizeBytes
 			m.statuses[i].LastError = row.Error
 			m.statuses[i].LastPaths = row.StoredPaths
+			m.statuses[i].LastReport = row.Report
 			m.statuses[i].LastElapsed = row.Duration
 			return
 		}
@@ -438,6 +471,7 @@ func (m *model) updateStatus(row backup.SummaryRow, at time.Time) {
 		LastSize:    row.SizeBytes,
 		LastError:   row.Error,
 		LastPaths:   row.StoredPaths,
+		LastReport:  row.Report,
 		LastElapsed: row.Duration,
 	})
 }
@@ -553,15 +587,27 @@ func configSize(path string) int64 {
 }
 
 func (m *model) syncViewports() {
-	targetsWidth, targetsHeight, activityWidth, activityHeight := m.panelSizes()
+	targetsWidth, reportsWidth, targetsHeight, activityWidth, activityHeight := m.panelSizes()
 	m.targetsVP.Width = targetsWidth
 	m.targetsVP.Height = targetsHeight
+	m.reportsVP.Width = reportsWidth
+	m.reportsVP.Height = targetsHeight
 	m.activityVP.Width = activityWidth
 	m.activityVP.Height = activityHeight
 
 	targetsContent, selectedLine := renderStatusesContent(*m)
 	m.targetsVP.SetContent(targetsContent)
 	m.ensureTargetsSelectionVisible(selectedLine)
+
+	if m.selectedReportIndex >= len(m.reports()) {
+		m.selectedReportIndex = len(m.reports()) - 1
+	}
+	if m.selectedReportIndex < 0 {
+		m.selectedReportIndex = 0
+	}
+	reportsContent, selectedReportLine := renderReportsContent(*m)
+	m.reportsVP.SetContent(reportsContent)
+	m.ensureReportsSelectionVisible(selectedReportLine)
 
 	m.activityVP.SetContent(renderEventsContent(*m))
 }
@@ -578,7 +624,19 @@ func (m *model) ensureTargetsSelectionVisible(selectedLine int) {
 	}
 }
 
-func (m model) panelSizes() (targetsWidth, targetsHeight, activityWidth, activityHeight int) {
+func (m *model) ensureReportsSelectionVisible(selectedLine int) {
+	if selectedLine < m.reportsVP.YOffset {
+		m.reportsVP.YOffset = selectedLine
+	}
+	if selectedLine >= m.reportsVP.YOffset+m.reportsVP.Height {
+		m.reportsVP.YOffset = selectedLine - m.reportsVP.Height + 1
+	}
+	if m.reportsVP.YOffset < 0 {
+		m.reportsVP.YOffset = 0
+	}
+}
+
+func (m model) panelSizes() (targetsWidth, reportsWidth, targetsHeight, activityWidth, activityHeight int) {
 	bodyWidth := m.width
 	if bodyWidth <= 0 {
 		bodyWidth = 120
@@ -615,10 +673,34 @@ func (m model) panelSizes() (targetsWidth, targetsHeight, activityWidth, activit
 	frameWidth := palette.panel.GetHorizontalFrameSize()
 	targetsHeight = maxInt(3, targetsOuter-frameHeight)
 	activityHeight = maxInt(3, activityOuter-frameHeight)
-	targetsWidth = maxInt(24, bodyWidth-frameWidth-4)
+	targetsOuterWidth, reportsOuterWidth := splitWorkPaneWidths(bodyWidth)
+	targetsWidth = maxInt(12, targetsOuterWidth-frameWidth)
+	reportsWidth = maxInt(12, reportsOuterWidth-frameWidth)
 	activityWidth = maxInt(24, bodyWidth-frameWidth-4)
 
-	return targetsWidth, targetsHeight, activityWidth, activityHeight
+	return targetsWidth, reportsWidth, targetsHeight, activityWidth, activityHeight
+}
+
+func splitWorkPaneWidths(bodyWidth int) (int, int) {
+	gap := 4
+	available := bodyWidth - gap
+	if available < 48 {
+		targetsWidth := available / 2
+		reportsWidth := available - targetsWidth
+		return maxInt(16, targetsWidth), maxInt(16, reportsWidth)
+	}
+
+	targetsWidth := int(float64(available) * 0.58)
+	reportsWidth := available - targetsWidth
+	if targetsWidth < 36 {
+		targetsWidth = 36
+		reportsWidth = available - targetsWidth
+	}
+	if reportsWidth < 30 {
+		reportsWidth = 30
+		targetsWidth = available - reportsWidth
+	}
+	return targetsWidth, reportsWidth
 }
 
 func (m model) View() string {
@@ -639,9 +721,12 @@ func (m model) View() string {
 	schedulerCard := palette.panel.Width(topRightWidth).Height(topInnerHeight).Render(schedulerContent)
 
 	targetsBorder := palette.panel
+	reportsBorder := palette.panel
 	activityBorder := palette.panel
 	if m.focus == focusTargets {
 		targetsBorder = palette.focusedPanel
+	} else if m.focus == focusReports {
+		reportsBorder = palette.focusedPanel
 	} else {
 		activityBorder = palette.focusedPanel
 	}
@@ -649,6 +734,11 @@ func (m model) View() string {
 	targetsPanel := targetsBorder.Render(strings.Join([]string{
 		palette.section.Render(sectionTitle("Targets", false)),
 		m.targetsVP.View(),
+	}, "\n"))
+
+	reportsPanel := reportsBorder.Render(strings.Join([]string{
+		palette.section.Render(sectionTitle("Log Runs", false)),
+		m.reportsVP.View(),
 	}, "\n"))
 
 	activityPanel := activityBorder.Render(strings.Join([]string{
@@ -661,7 +751,7 @@ func (m model) View() string {
 	mainView := lipgloss.JoinVertical(
 		lipgloss.Left,
 		lipgloss.JoinHorizontal(lipgloss.Top, headerCard, schedulerCard),
-		targetsPanel,
+		lipgloss.JoinHorizontal(lipgloss.Top, targetsPanel, reportsPanel),
 		activityPanel,
 		footer,
 	)
@@ -784,7 +874,7 @@ func (m model) lastRunCounts() (successCount, failureCount int) {
 func renderCommandBar(palette styles) string {
 	return strings.Join([]string{
 		palette.section.Render("Commands"),
-		palette.muted.Render("Press / for palette. Use Tab to switch focus between Targets and Activity. Use Up/Down, PgUp/PgDn, Home/End to scroll. Press Enter for target details. Press b for backup now. Press Esc to close overlays. Press q to quit."),
+		palette.muted.Render("Press / for palette. Use Tab to switch focus between Targets, Log Runs, and Activity. Use Up/Down, PgUp/PgDn, Home/End to scroll. Press Enter for details. Press b for backup now. Press Esc to close overlays. Press q to quit."),
 	}, "\n")
 }
 
@@ -834,6 +924,40 @@ func renderStatusesContent(m model) (string, int) {
 
 	if len(lines) == 0 {
 		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("246")).Render("No configured targets"))
+	}
+	return strings.Join(lines, "\n"), selectedLine
+}
+
+func renderReportsContent(m model) (string, int) {
+	reports := m.reports()
+	lines := make([]string, 0, len(reports)*2+2)
+	selectedLine := 0
+	for i, report := range reports {
+		cursor := " "
+		rowStyle := lipgloss.NewStyle()
+		if i == m.selectedReportIndex {
+			cursor = ">"
+			rowStyle = lipgloss.NewStyle().Bold(true)
+			selectedLine = len(lines)
+		}
+
+		statusSummary := formatStatusCounts(report.HTTPStatusCounts)
+		if statusSummary != "" {
+			statusSummary = "  " + statusSummary
+		}
+		lines = append(lines, rowStyle.Render(fmt.Sprintf("%s %s/%s",
+			cursor,
+			report.Backup,
+			report.Target,
+		)))
+		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("246")).Render(fmt.Sprintf("  %s  matched %d%s",
+			report.Server,
+			report.TotalMatchedLines,
+			statusSummary,
+		)))
+	}
+	if len(lines) == 0 {
+		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("246")).Render("No log report runs yet"))
 	}
 	return strings.Join(lines, "\n"), selectedLine
 }
@@ -897,6 +1021,10 @@ func renderPaletteOverlay(base string, m model, palette styles) string {
 }
 
 func renderDetailsOverlay(base string, m model, palette styles) string {
+	if m.focus == focusReports {
+		return renderReportDetailsOverlay(base, m, palette)
+	}
+
 	selected := m.selectedStatus()
 	if selected == nil {
 		return base
@@ -941,11 +1069,79 @@ func renderDetailsOverlay(base string, m model, palette styles) string {
 	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, box, lipgloss.WithWhitespaceChars(" "))
 }
 
+func renderReportDetailsOverlay(base string, m model, palette styles) string {
+	report := m.selectedReport()
+	if report == nil {
+		return base
+	}
+
+	lines := []string{
+		palette.section.Render("Log Run Summary"),
+		fmt.Sprintf("%s/%s/%s", report.Server, report.Backup, report.Target),
+		fmt.Sprintf("%s %s", palette.label.Render("date"), report.Date.UTC().Format("2006-01-02")),
+		fmt.Sprintf("%s %s", palette.label.Render("path"), report.SourcePath),
+		fmt.Sprintf("%s %d", palette.label.Render("matched lines"), report.TotalMatchedLines),
+		fmt.Sprintf("%s %d scanned, %d skipped, %d archived",
+			palette.label.Render("log files"),
+			report.ScannedFileCount,
+			report.SkippedFileCount,
+			report.ArchivedFileCount,
+		),
+	}
+	if len(report.HTTPStatusCounts) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, palette.section.Render("HTTP Statuses"))
+		for _, count := range report.HTTPStatusCounts {
+			lines = append(lines, fmt.Sprintf("%s: %d", count.Status, count.Count))
+		}
+	}
+	if len(report.Findings) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, palette.section.Render("Pattern Counts"))
+		for i, finding := range report.Findings {
+			if i >= 12 {
+				lines = append(lines, palette.muted.Render(fmt.Sprintf("... %d more", len(report.Findings)-i)))
+				break
+			}
+			statusSummary := formatStatusCounts(finding.HTTPStatusCounts)
+			if statusSummary != "" {
+				statusSummary = "  " + statusSummary
+			}
+			lines = append(lines, fmt.Sprintf("%s: %d%s", finding.Pattern, finding.Count, statusSummary))
+		}
+	}
+	if len(report.TopSourceIPs) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, palette.section.Render("Top Source IPs"))
+		for _, count := range report.TopSourceIPs {
+			lines = append(lines, fmt.Sprintf("%s: %d", count.IP, count.Count))
+		}
+	}
+	if report.ReportPath != "" {
+		lines = append(lines, "")
+		lines = append(lines, palette.section.Render("Report File"))
+		lines = append(lines, palette.muted.Render(filepath.Clean(report.ReportPath)))
+	}
+	lines = append(lines, "")
+	lines = append(lines, palette.muted.Render("Press Enter or Esc to close"))
+
+	box := palette.overlay.Width(72).Render(strings.Join(lines, "\n"))
+	w := m.width
+	if w <= 0 {
+		w = 120
+	}
+	h := m.height
+	if h <= 0 {
+		h = 34
+	}
+	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, box, lipgloss.WithWhitespaceChars(" "))
+}
+
 func commandPaletteItems() []paletteCommand {
 	return []paletteCommand{
 		{Key: "b", Label: "Run Backup Now", Description: "Trigger an immediate backup across all configured targets"},
 		{Key: "p", Label: "Pause Or Resume Scheduler", Description: "Toggle automatic scheduled backups"},
-		{Key: "tab", Label: "Switch Scroll Pane", Description: "Move focus between targets and activity"},
+		{Key: "tab", Label: "Switch Scroll Pane", Description: "Move focus between targets, log runs, and activity"},
 		{Key: "q", Label: "Quit", Description: "Exit the TUI"},
 	}
 }
@@ -955,6 +1151,33 @@ func (m model) selectedStatus() *databaseStatus {
 		return nil
 	}
 	return &m.statuses[m.selected]
+}
+
+func (m model) reports() []backup.SanityReportSummary {
+	var reports []backup.SanityReportSummary
+	for _, status := range m.statuses {
+		if status.LastReport != nil {
+			reports = append(reports, *status.LastReport)
+		}
+	}
+	sort.Slice(reports, func(i, j int) bool {
+		if reports[i].Date.Equal(reports[j].Date) {
+			left := reports[i].Server + "/" + reports[i].Backup + "/" + reports[i].Target
+			right := reports[j].Server + "/" + reports[j].Backup + "/" + reports[j].Target
+			return left < right
+		}
+		return reports[i].Date.After(reports[j].Date)
+	})
+	return reports
+}
+
+func (m model) selectedReport() *backup.SanityReportSummary {
+	reports := m.reports()
+	if m.selectedReportIndex < 0 || m.selectedReportIndex >= len(reports) {
+		return nil
+	}
+	report := reports[m.selectedReportIndex]
+	return &report
 }
 
 func (m model) selectedDatabaseConfig() *config.SelectedTarget {
@@ -969,6 +1192,17 @@ func (m model) selectedDatabaseConfig() *config.SelectedTarget {
 		}
 	}
 	return nil
+}
+
+func formatStatusCounts(counts []backup.StatusCount) string {
+	if len(counts) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(counts))
+	for _, count := range counts {
+		parts = append(parts, fmt.Sprintf("%s:%d", count.Status, count.Count))
+	}
+	return strings.Join(parts, " ")
 }
 
 func formatTime(t time.Time) string {

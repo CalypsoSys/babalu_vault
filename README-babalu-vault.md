@@ -10,6 +10,7 @@ It supports:
 - Live PostgreSQL database discovery using `pg_database`
 - Gzipped SQL archives for database targets and gzipped tar archives for file targets
 - Optional plain-text sanity reports for file targets such as `/srv/logs`
+- TUI log-run pane for reviewing sanity report summaries
 - Global retention policy
 - Continuous TUI mode with a daily in-app scheduler
 - One-shot `list` and `backup` commands
@@ -219,6 +220,8 @@ TUI controls:
 - `b`: run backup now
 - `p`: pause or resume the scheduler
 - `j` / `k`: move through configured targets
+- `Tab`: switch between Targets, Log Runs, and Activity
+- `Enter`: open details for the selected target or log run
 - `q`: quit
 
 List backup targets:
@@ -352,7 +355,9 @@ daily_example-logs_srv-logs_2026-06-03.tar.gz
 daily_example-logs_srv-logs_2026-06-03.report.txt
 ```
 
-Patterns are Go regular expressions and are matched case-insensitively. Reports include the server, backup, target, source path, date, archived file count, archive size, scanned and skipped log counts, per-pattern counts, total matched lines, and top source IPs from matched lines that look like HTTP access logs.
+Patterns are Go regular expressions and are matched case-insensitively. Reports include the server, backup, target, source path, date, archived file count, archive size, scanned and skipped log counts, HTTP status counts for matched access-log lines, per-pattern counts with status breakdowns such as `200`, `404`, and `50x`, total matched lines, and top source IPs from matched lines that look like HTTP access logs.
+
+In the TUI, completed sanity report runs appear in the Log Runs pane next to Targets. Select a log run and press `Enter` to see its summary, including status breakdowns, top pattern counts, top source IPs, and report path.
 
 By default, `scan_rotated: false` skips rotated or compressed artifacts during report scanning, including `*.gz`, `*.zip`, `*.tar`, `*.tar.gz`, `*.tgz`, `*.bz2`, `*.xz`, numbered rotations like `*.1`, and dated rotations like `*.2026-06-03`. This does not change what `tar` archives; it only limits what the sanity report inspects. Set `scan_rotated: true` only when you intentionally want older artifacts included in the report scan.
 

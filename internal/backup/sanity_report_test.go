@@ -18,7 +18,7 @@ func TestBuildSanityReportFromArchiveSkipsRotatedLogsByDefault(t *testing.T) {
 	writeTestTarGzip(t, archivePath, map[string]string{
 		"./access.log": strings.Join([]string{
 			`203.0.113.10 - - [03/Jun/2026:02:00:00 +0000] "GET /.env HTTP/1.1" 404 11`,
-			`203.0.113.10 - - [03/Jun/2026:02:00:01 +0000] "GET /api/.env HTTP/1.1" 404 11`,
+			`203.0.113.10 - - [03/Jun/2026:02:00:01 +0000] "GET /api/.env HTTP/1.1" 200 11`,
 			`198.51.100.5 - - [03/Jun/2026:02:00:02 +0000] "GET /health HTTP/1.1" 500 11`,
 			"panic: permission denied",
 			"",
@@ -46,11 +46,23 @@ func TestBuildSanityReportFromArchiveSkipsRotatedLogsByDefault(t *testing.T) {
 	if got := reportPatternCount(report, "/.env"); got != 2 {
 		t.Fatalf("expected /.env count 2, got %d", got)
 	}
+	if got := reportPatternStatusCount(report, "/.env", "200"); got != 1 {
+		t.Fatalf("expected /.env 200 count 1, got %d", got)
+	}
+	if got := reportPatternStatusCount(report, "/.env", "404"); got != 1 {
+		t.Fatalf("expected /.env 404 count 1, got %d", got)
+	}
 	if got := reportPatternCount(report, "/api/.env"); got != 1 {
 		t.Fatalf("expected /api/.env count 1, got %d", got)
 	}
+	if got := reportPatternStatusCount(report, "/api/.env", "200"); got != 1 {
+		t.Fatalf("expected /api/.env 200 count 1, got %d", got)
+	}
 	if got := reportPatternCount(report, "500"); got != 1 {
 		t.Fatalf("expected 500 count 1, got %d", got)
+	}
+	if got := reportPatternStatusCount(report, "500", "50x"); got != 1 {
+		t.Fatalf("expected 500 50x count 1, got %d", got)
 	}
 	if got := reportPatternCount(report, "panic"); got != 1 {
 		t.Fatalf("expected panic count 1, got %d", got)
@@ -64,6 +76,26 @@ func TestBuildSanityReportFromArchiveSkipsRotatedLogsByDefault(t *testing.T) {
 	if len(report.TopSourceIPs) != 2 || report.TopSourceIPs[0].IP != "203.0.113.10" || report.TopSourceIPs[0].Count != 2 {
 		t.Fatalf("unexpected top source IPs %+v", report.TopSourceIPs)
 	}
+	if got := reportStatusCount(report, "200"); got != 1 {
+		t.Fatalf("expected 200 count 1, got %d", got)
+	}
+	if got := reportStatusCount(report, "404"); got != 1 {
+		t.Fatalf("expected 404 count 1, got %d", got)
+	}
+	if got := reportStatusCount(report, "50x"); got != 1 {
+		t.Fatalf("expected 50x count 1, got %d", got)
+	}
+
+	findings := findingsFromSanityReport(report, "/tmp/report.txt")
+	if len(findings) != 5 {
+		t.Fatalf("expected 5 findings, got %+v", findings)
+	}
+	if findings[0].Pattern != "/.env" || findings[0].Count != 2 || findings[0].ReportPath != "/tmp/report.txt" {
+		t.Fatalf("unexpected first finding %+v", findings[0])
+	}
+	if len(findings[0].TopSourceIPs) != 1 || findings[0].TopSourceIPs[0].IP != "203.0.113.10" || findings[0].TopSourceIPs[0].Count != 2 {
+		t.Fatalf("unexpected first finding top IPs %+v", findings[0].TopSourceIPs)
+	}
 
 	rendered := renderSanityReport(report)
 	for _, expected := range []string{
@@ -75,7 +107,13 @@ func TestBuildSanityReportFromArchiveSkipsRotatedLogsByDefault(t *testing.T) {
 		"Log files archived: 3",
 		"Log files scanned: 1",
 		"Rotated/compressed logs skipped: 2",
+		"HTTP status counts:",
+		"  200: 1",
+		"  404: 1",
+		"  50x: 1",
 		"  /.env: 2",
+		"    200: 1",
+		"    404: 1",
 		"Total matched lines: 4",
 		"Top source IPs:",
 	} {
@@ -136,6 +174,24 @@ func selectedLogFileSSH() config.SelectedTarget {
 func reportPatternCount(report sanityReport, name string) int {
 	for _, count := range report.PatternCounts {
 		if count.Name == name {
+			return count.Count
+		}
+	}
+	return 0
+}
+
+func reportPatternStatusCount(report sanityReport, name, status string) int {
+	for _, count := range report.PatternCounts {
+		if count.Name == name {
+			return count.statusCounts[status]
+		}
+	}
+	return 0
+}
+
+func reportStatusCount(report sanityReport, status string) int {
+	for _, count := range report.HTTPStatusCounts {
+		if count.Status == status {
 			return count.Count
 		}
 	}

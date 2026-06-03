@@ -41,6 +41,7 @@ type SummaryRow struct {
 	Duration    time.Duration
 	Error       string
 	Operations  []OperationEntry
+	Report      *SanityReportSummary
 }
 
 type OperationEntry struct {
@@ -229,6 +230,8 @@ func (r *Runner) runOne(ctx context.Context, item config.SelectedTarget, dryRun 
 			return row
 		}
 		defer os.Remove(reportLocalPath)
+		summary := summaryFromSanityReport(report, row.StoredPaths[1])
+		row.Report = &summary
 		logOperation("info", "sanity report created",
 			slog.String("local_file", reportLocalPath),
 			slog.Int("matched_lines", report.TotalMatchedLines),

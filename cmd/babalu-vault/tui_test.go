@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -169,6 +170,97 @@ func TestBackupProgressMarksMatchingTargetRunning(t *testing.T) {
 
 	if m.statuses[0].LastStatus != "running" {
 		t.Fatalf("expected target to become running, got %+v", m.statuses[0])
+	}
+}
+
+func TestRenderReportsContentShowsLogRuns(t *testing.T) {
+	reportDate := time.Date(2026, 6, 3, 13, 57, 0, 0, time.UTC)
+	m := model{
+		statuses: []databaseStatus{
+			{
+				Server:   "hasimojoe",
+				Backup:   "homelab-logs",
+				Database: "srv-logs",
+				LastReport: &backup.SanityReportSummary{
+					Server:            "hasimojoe",
+					Backup:            "homelab-logs",
+					Target:            "srv-logs",
+					SourcePath:        "/srv/logs",
+					Date:              reportDate,
+					ArchivedFileCount: 18,
+					ScannedFileCount:  12,
+					SkippedFileCount:  6,
+					TotalMatchedLines: 55,
+					HTTPStatusCounts: []backup.StatusCount{
+						{Status: "200", Count: 2},
+						{Status: "404", Count: 53},
+					},
+					TopSourceIPs: []backup.SourceIPCount{
+						{IP: "203.0.113.10", Count: 30},
+					},
+					Findings: []backup.SanityFinding{
+						{
+							Server:  "hasimojoe",
+							Backup:  "homelab-logs",
+							Target:  "srv-logs",
+							Pattern: "/.env",
+							Count:   46,
+							HTTPStatusCounts: []backup.StatusCount{
+								{Status: "200", Count: 2},
+								{Status: "404", Count: 44},
+							},
+						},
+						{
+							Server:  "hasimojoe",
+							Backup:  "homelab-logs",
+							Target:  "srv-logs",
+							Pattern: "/.env.local",
+							Count:   9,
+							HTTPStatusCounts: []backup.StatusCount{
+								{Status: "404", Count: 9},
+							},
+						},
+					},
+					ReportPath: "/tmp/report.txt",
+				},
+			},
+		},
+	}
+
+	reports := m.reports()
+	if len(reports) != 1 || reports[0].Backup != "homelab-logs" {
+		t.Fatalf("expected one report run, got %+v", reports)
+	}
+
+	content, selectedLine := renderReportsContent(m)
+	if selectedLine != 0 {
+		t.Fatalf("expected selected report line 0, got %d", selectedLine)
+	}
+	for _, expected := range []string{
+		"> homelab-logs/srv-logs",
+		"  hasimojoe  matched 55  200:2 404:53",
+	} {
+		if !strings.Contains(content, expected) {
+			t.Fatalf("expected reports content to contain %q, got:\n%s", expected, content)
+		}
+	}
+
+	selected := m.selectedReport()
+	if selected == nil || selected.TotalMatchedLines != 55 || selected.ReportPath != "/tmp/report.txt" {
+		t.Fatalf("unexpected selected report %+v", selected)
+	}
+
+	overlay := renderReportDetailsOverlay("base", m, tuiPalette())
+	for _, expected := range []string{
+		"Log Run Summary",
+		"matched lines 55",
+		"Pattern Counts",
+		"/.env: 46  200:2 404:44",
+		"Report File",
+	} {
+		if !strings.Contains(overlay, expected) {
+			t.Fatalf("expected report overlay to contain %q, got:\n%s", expected, overlay)
+		}
 	}
 }
 
